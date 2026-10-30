@@ -207,3 +207,100 @@ func (s *P11DiagService) RunDiagnostics(modulePath string, pin string) ([]DiagSt
 
 	return steps, nil
 }
+
+// InitToken initializes a token on the specified slot with the provided PIN and label.
+func (s *P11DiagService) InitToken(modulePath string, slotID uintptr, pin string, label string) error {
+	client, err := p11.NewP11Client(modulePath)
+	if err != nil {
+		return fmt.Errorf("module load failed: %w", err)
+	}
+	defer client.Close()
+
+	if err := client.Initialize(); err != nil {
+		return fmt.Errorf("initialization failed: %w", err)
+	}
+	defer func() { _ = client.Finalize() }()
+
+	if err := client.InitToken(slotID, pin, label); err != nil {
+		return fmt.Errorf("token initialization failed: %w", err)
+	}
+	return nil
+}
+
+// GenerateKeyPair generates an ECDSA keypair on the specified slot and key ID.
+func (s *P11DiagService) GenerateKeyPair(modulePath string, slotID uintptr, pin string, keyID int, label string) (uintptr, uintptr, error) {
+	client, err := p11.NewP11Client(modulePath)
+	if err != nil {
+		return 0, 0, fmt.Errorf("module load failed: %w", err)
+	}
+	defer client.Close()
+
+	if err := client.Initialize(); err != nil {
+		return 0, 0, fmt.Errorf("initialization failed: %w", err)
+	}
+	defer func() { _ = client.Finalize() }()
+
+	hSession, err := client.OpenSession(slotID, p11.CKF_SERIAL_SESSION|p11.CKF_RW_SESSION)
+	if err != nil {
+		return 0, 0, fmt.Errorf("open session failed: %w", err)
+	}
+	defer func() { _ = client.CloseSession(hSession) }()
+
+	if err := client.Login(hSession, p11.CKU_USER, pin); err != nil {
+		return 0, 0, fmt.Errorf("login failed: %w", err)
+	}
+	defer func() { _ = client.Logout(hSession) }()
+
+	hPub, hPriv, err := client.GenerateKeyPair(hSession, keyID, label)
+	if err != nil {
+		return 0, 0, fmt.Errorf("keypair generation failed: %w", err)
+	}
+
+	return hPub, hPriv, nil
+}
+
+// SignData computes an ECDSA signature over the provided data/hash using the private key in keyID.
+func (s *P11DiagService) SignData(modulePath string, slotID uintptr, pin string, keyID int, data []byte) ([]byte, error) {
+	client, err := p11.NewP11Client(modulePath)
+	if err != nil {
+		return nil, fmt.Errorf("module load failed: %w", err)
+	}
+	defer client.Close()
+
+	if err := client.Initialize(); err != nil {
+		return nil, fmt.Errorf("initialization failed: %w", err)
+	}
+	defer func() { _ = client.Finalize() }()
+
+	hSession, err := client.OpenSession(slotID, p11.CKF_SERIAL_SESSION|p11.CKF_RW_SESSION)
+	if err != nil {
+		return nil, fmt.Errorf("open session failed: %w", err)
+	}
+	defer func() { _ = client.CloseSession(hSession) }()
+
+	if err := client.Login(hSession, p11.CKU_USER, pin); err != nil {
+		return nil, fmt.Errorf("login failed: %w", err)
+	}
+	defer func() { _ = client.Logout(hSession) }()
+
+	// Key handle convention: private key handle is 0x80000000 | keyID
+	hKey := uintptr(keyID) | 0x80000000
+	sig, err := client.Sign(hSession, hKey, p11.CKM_ECDSA, data)
+	if err != nil {
+		return nil, fmt.Errorf("signing failed: %w", err)
+	}
+
+	return sig, nil
+}
+
+// DiagnosticsSummary aggregates diagnostic step results into a readable report.
+func (s *P11DiagService) DiagnosticsSummary(steps []DiagStep) string {
+	passed := 0
+	for _, st := range steps {
+		if st.Passed {
+			passed++
+		}
+	}
+	total := len(steps)
+	return fmt.Sprintf("Passed: %d/%d (%.1f%%)", passed, total, float64(passed)/float64(total)*100.0)
+}

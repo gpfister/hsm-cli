@@ -281,3 +281,104 @@ func TestCMEError_ParseAndFormatting(t *testing.T) {
 		t.Errorf("expected unknown code in error string, got %s", unknownErr.Error())
 	}
 }
+
+func TestATClient_ThresholdInit(t *testing.T) {
+	mt := newMockTransport()
+	mt.responses["AT+INIT=THRESHOLD,3,5"] = []string{
+		`+SHARE: 1,0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20,abandon`,
+		`+SHARE: 2,0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20,ability`,
+		`+SHARE: 3,0302030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20,able`,
+		`+SHARE: 4,0402030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20,about`,
+		`+SHARE: 5,0502030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20,above`,
+	}
+
+	client := NewATClient(mt)
+	res, err := client.ThresholdInit(3, 5)
+	if err != nil {
+		t.Fatalf("ThresholdInit failed: %v", err)
+	}
+
+	if res.Threshold != 3 || res.Total != 5 {
+		t.Errorf("unexpected threshold parameters: %d/%d", res.Threshold, res.Total)
+	}
+	if len(res.Shares) != 5 {
+		t.Fatalf("expected 5 shares, got %d", len(res.Shares))
+	}
+	if res.Shares[0].Index != 1 || res.Shares[0].CommitmentWord != "abandon" {
+		t.Errorf("unexpected share 1: %+v", res.Shares[0])
+	}
+
+	// Boundary validations
+	if _, err := client.ThresholdInit(1, 5); err == nil {
+		t.Errorf("expected error for threshold < 2")
+	}
+	if _, err := client.ThresholdInit(4, 3); err == nil {
+		t.Errorf("expected error for threshold > total")
+	}
+}
+
+func TestATClient_SubmitShare(t *testing.T) {
+	mt := newMockTransport()
+	mt.responses["AT+SHARE=1,aabbccddeeff"] = []string{
+		`+COMMIT: 1,abandon`,
+	}
+
+	client := NewATClient(mt)
+	commit, err := client.SubmitShare(1, "aabbccddeeff")
+	if err != nil {
+		t.Fatalf("SubmitShare failed: %v", err)
+	}
+
+	if commit.Index != 1 || commit.Word != "abandon" {
+		t.Errorf("unexpected commitment: %+v", commit)
+	}
+
+	// Validation
+	if _, err := client.SubmitShare(0, "hex"); err == nil {
+		t.Errorf("expected error on invalid index")
+	}
+	if _, err := client.SubmitShare(1, ""); err == nil {
+		t.Errorf("expected error on empty share")
+	}
+}
+
+func TestATClient_TargetInit(t *testing.T) {
+	mt := newMockTransport()
+	mt.responses["AT+MIGRATE=INIT_TARGET"] = []string{
+		`+TARGET: 040102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20`,
+	}
+
+	client := NewATClient(mt)
+	pub, err := client.TargetInit()
+	if err != nil {
+		t.Fatalf("TargetInit failed: %v", err)
+	}
+
+	if pub != "040102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20" {
+		t.Errorf("unexpected target pubkey: %s", pub)
+	}
+}
+
+func TestATClient_MigrateWrapAndUnwrap(t *testing.T) {
+	mt := newMockTransport()
+	targetPub := "040102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+	mt.responses["AT+MIGRATE=WRAP,1,"+targetPub] = []string{
+		`+WRAP: 1,EC_P256,` + targetPub + `,cipher123,tag456,nonce789`,
+	}
+
+	client := NewATClient(mt)
+	env, err := client.MigrateWrap(1, targetPub)
+	if err != nil {
+		t.Fatalf("MigrateWrap failed: %v", err)
+	}
+
+	if env.SlotID != 1 || env.Algorithm != "EC_P256" || env.EncryptedKey != "cipher123" {
+		t.Errorf("unexpected envelope: %+v", env)
+	}
+
+	// Test Unwrap
+	mt.responses["AT+MIGRATE=UNWRAP,1,EC_P256,"+targetPub+",cipher123,tag456,nonce789"] = []string{}
+	if err := client.MigrateUnwrap(env); err != nil {
+		t.Fatalf("MigrateUnwrap failed: %v", err)
+	}
+}

@@ -3,29 +3,39 @@ package cli
 import (
 	"fmt"
 
+	"github.com/gpfister/nrf52840-hsm-cli/internal/usecases"
 	"github.com/spf13/cobra"
 )
 
 func newAuthCmd() *cobra.Command {
 	var pin string
+	var thresholdMode bool
 
 	cmd := &cobra.Command{
 		Use:     "auth",
 		Aliases: []string{"unlock"},
-		Short:   "Authenticate User PIN and unlock the HSM (AT+AUTH)",
+		Short:   "Authenticate User PIN or execute threshold ceremony to unlock the HSM",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if pin == "" && len(args) > 0 {
-				pin = args[0]
-			}
-			if pin == "" {
-				return fmt.Errorf("PIN is required: supply via --pin or positional argument")
-			}
-
 			client, cleanup, err := getATClient()
 			if err != nil {
 				return err
 			}
 			defer cleanup()
+
+			if thresholdMode {
+				ceremony := usecases.NewCeremonyService()
+				if _, err := ceremony.RunTurnByTurnAuth(client); err != nil {
+					return fmt.Errorf("threshold authentication ceremony failed: %w", err)
+				}
+				return nil
+			}
+
+			if pin == "" && len(args) > 0 {
+				pin = args[0]
+			}
+			if pin == "" {
+				return fmt.Errorf("PIN is required: supply via --pin, positional argument, or use --threshold")
+			}
 
 			if err := client.Auth(pin); err != nil {
 				return fmt.Errorf("authentication failed: %w", err)
@@ -37,6 +47,7 @@ func newAuthCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&pin, "pin", "", "User PIN (4..16 characters)")
+	cmd.Flags().BoolVarP(&thresholdMode, "threshold", "t", false, "Execute turn-by-turn custodian threshold unlock ceremony")
 	return cmd
 }
 

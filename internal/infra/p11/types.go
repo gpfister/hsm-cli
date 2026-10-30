@@ -53,7 +53,33 @@ const (
 	CKM_ECDSA                uint64 = 0x00001041
 	CKM_ECDSA_SHA256         uint64 = 0x00001043
 	CKM_SHA256               uint64 = 0x00000250
+
+	// Attribute types
+	CKA_CLASS    uint64 = 0x00000000
+	CKA_TOKEN    uint64 = 0x00000001
+	CKA_PRIVATE  uint64 = 0x00000002
+	CKA_LABEL    uint64 = 0x00000003
+	CKA_KEY_TYPE uint64 = 0x00000100
+	CKA_ID       uint64 = 0x00000102
+	CKA_SIGN     uint64 = 0x00000108
+	CKA_VERIFY   uint64 = 0x0000010A
+	CKA_EC_PARAMS uint64 = 0x00000180
+	CKA_EC_POINT uint64 = 0x00000181
 )
+
+// CK_MECHANISM specifies a cryptographic mechanism and its parameters.
+type CK_MECHANISM struct {
+	Mechanism    uint64
+	Parameter    uintptr
+	ParameterLen uint64
+}
+
+// CK_ATTRIBUTE contains the type, value and length of an attribute.
+type CK_ATTRIBUTE struct {
+	Type     uint64
+	Value    uintptr
+	ValueLen uint64
+}
 
 // CK_VERSION represents Cryptoki major/minor versions.
 type CK_VERSION struct {

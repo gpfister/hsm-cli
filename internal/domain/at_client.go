@@ -406,3 +406,310 @@ func splitQuotedCsv(s string) []string {
 
 	return entries
 }
+
+// ThresholdInit executes threshold initialization (e.g. 3-of-5) via AT+INIT=THRESHOLD,<k>,<n>.
+func (c *ATClient) ThresholdInit(threshold, total int) (*ThresholdInitResult, error) {
+	if threshold < 2 || total < threshold {
+		return nil, fmt.Errorf("invalid threshold parameters: threshold=%d, total=%d (must be 2 <= k <= n)", threshold, total)
+	}
+
+	lines, err := c.transport.SendCommand(fmt.Sprintf("AT+INIT=THRESHOLD,%d,%d", threshold, total), 10*time.Second)
+	if err != nil {
+		return nil, err
+	}
+
+	var shares []CustodianShare
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		if strings.HasPrefix(trimmed, "+SHARE:") {
+			share, err := parseShareLine(trimmed)
+			if err != nil {
+				return nil, err
+			}
+			shares = append(shares, *share)
+		}
+	}
+
+	if len(shares) == 0 {
+		return nil, errors.New("no custodian shares returned by HSM")
+	}
+
+	return &ThresholdInitResult{
+		Threshold: threshold,
+		Total:     total,
+		Shares:    shares,
+	}, nil
+}
+
+// SubmitShare submits a single custodian share during threshold authentication via AT+SHARE=<index>,<shareHex>.
+func (c *ATClient) SubmitShare(index int, shareHex string) (*WordCommitment, error) {
+	if index <= 0 {
+		return nil, errors.New("custodian index must be >= 1")
+	}
+	if strings.TrimSpace(shareHex) == "" {
+		return nil, errors.New("share cannot be empty")
+	}
+
+	lines, err := c.transport.SendCommand(fmt.Sprintf("AT+SHARE=%d,%s", index, strings.TrimSpace(shareHex)), 5*time.Second)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		if strings.HasPrefix(trimmed, "+COMMIT:") || strings.HasPrefix(trimmed, "+WORD:") {
+			return parseCommitLine(trimmed, index)
+		}
+	}
+
+	return nil, errors.New("missing +COMMIT: line in device response")
+}
+
+// TargetInit generates an ephemeral ECDH public key on the target HSM for blind migration via AT+MIGRATE=INIT_TARGET.
+func (c *ATClient) TargetInit() (string, error) {
+	lines, err := c.transport.SendCommand("AT+MIGRATE=INIT_TARGET", 5*time.Second)
+	if err != nil {
+		return "", err
+	}
+
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		if strings.HasPrefix(trimmed, "+TARGET:") || strings.HasPrefix(trimmed, "+MIGRATE:") || strings.HasPrefix(trimmed, "+PUBKEY:") {
+			return parseTargetInitLine(trimmed)
+		}
+	}
+
+	return "", errors.New("missing +TARGET: line in target device response")
+}
+
+// MigrateWrap wraps (encrypts) the key in slotID using targetPubKeyHex via AT+MIGRATE=WRAP,<slotID>,<targetPubKeyHex>.
+func (c *ATClient) MigrateWrap(slotID int, targetPubKeyHex string) (*MigrationEnvelope, error) {
+	if slotID <= 0 {
+		return nil, errors.New("slot ID must be >= 1")
+	}
+	if strings.TrimSpace(targetPubKeyHex) == "" {
+		return nil, errors.New("target public key cannot be empty")
+	}
+
+	lines, err := c.transport.SendCommand(fmt.Sprintf("AT+MIGRATE=WRAP,%d,%s", slotID, strings.TrimSpace(targetPubKeyHex)), 10*time.Second)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		if strings.HasPrefix(trimmed, "+WRAP:") {
+			env, err := parseWrapLine(trimmed, slotID, targetPubKeyHex)
+			if err != nil {
+				return nil, err
+			}
+			if err := env.Validate(); err != nil {
+				return nil, fmt.Errorf("invalid envelope returned: %w", err)
+			}
+			return env, nil
+		}
+	}
+
+	return nil, errors.New("missing +WRAP: line in source device response")
+}
+
+// MigrateUnwrap imports and decrypts the encrypted key envelope on the target HSM via AT+MIGRATE=UNWRAP,...
+func (c *ATClient) MigrateUnwrap(env *MigrationEnvelope) error {
+	if env == nil {
+		return errors.New("migration envelope cannot be nil")
+	}
+	if err := env.Validate(); err != nil {
+		return fmt.Errorf("invalid migration envelope: %w", err)
+	}
+
+	cmd := fmt.Sprintf("AT+MIGRATE=UNWRAP,%d,%s,%s,%s,%s,%s",
+		env.SlotID, env.Algorithm, env.EphemeralPub, env.EncryptedKey, env.AuthTag, env.Nonce)
+	_, err := c.transport.SendCommand(cmd, 10*time.Second)
+	return err
+}
+
+func parseShareLine(line string) (*CustodianShare, error) {
+	content := strings.TrimSpace(strings.TrimPrefix(line, "+SHARE:"))
+	if strings.Contains(content, "=") {
+		parts := strings.Split(content, ",")
+		var share CustodianShare
+		for _, p := range parts {
+			kv := strings.SplitN(strings.TrimSpace(p), "=", 2)
+			if len(kv) == 2 {
+				k := strings.ToUpper(strings.TrimSpace(kv[0]))
+				v := strings.Trim(strings.TrimSpace(kv[1]), "\"")
+				switch k {
+				case "INDEX", "ID":
+					id, _ := strconv.Atoi(v)
+					share.Index = id
+				case "SHARE", "KEY":
+					share.Share = v
+				case "WORD", "COMMIT", "COMMITMENT":
+					share.CommitmentWord = v
+				}
+			}
+		}
+		if share.Index > 0 && share.Share != "" {
+			return &share, nil
+		}
+	}
+
+	parts := strings.Split(content, ",")
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("malformed +SHARE line: %s", line)
+	}
+	idx, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return nil, fmt.Errorf("invalid share index in '%s': %w", line, err)
+	}
+	shareHex := strings.Trim(strings.TrimSpace(parts[1]), "\"")
+	var commitmentWord string
+	if len(parts) >= 3 {
+		commitmentWord = strings.Trim(strings.TrimSpace(parts[2]), "\"")
+	}
+
+	return &CustodianShare{
+		Index:          idx,
+		Share:          shareHex,
+		CommitmentWord: commitmentWord,
+	}, nil
+}
+
+func parseCommitLine(line string, fallbackIndex int) (*WordCommitment, error) {
+	content := strings.TrimSpace(line)
+	if strings.HasPrefix(content, "+COMMIT:") {
+		content = strings.TrimSpace(strings.TrimPrefix(content, "+COMMIT:"))
+	} else if strings.HasPrefix(content, "+WORD:") {
+		content = strings.TrimSpace(strings.TrimPrefix(content, "+WORD:"))
+	}
+
+	if strings.Contains(content, "=") {
+		parts := strings.Split(content, ",")
+		idx := fallbackIndex
+		word := ""
+		for _, p := range parts {
+			kv := strings.SplitN(strings.TrimSpace(p), "=", 2)
+			if len(kv) == 2 {
+				k := strings.ToUpper(strings.TrimSpace(kv[0]))
+				v := strings.Trim(strings.TrimSpace(kv[1]), "\"")
+				if k == "INDEX" || k == "ID" {
+					if id, err := strconv.Atoi(v); err == nil {
+						idx = id
+					}
+				} else if k == "WORD" || k == "COMMIT" {
+					word = v
+				}
+			}
+		}
+		if word != "" {
+			return &WordCommitment{Index: idx, Word: word}, nil
+		}
+	}
+
+	parts := strings.Split(content, ",")
+	if len(parts) == 1 {
+		return &WordCommitment{
+			Index: fallbackIndex,
+			Word:  strings.Trim(strings.TrimSpace(parts[0]), "\""),
+		}, nil
+	}
+	idx, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		idx = fallbackIndex
+	}
+	return &WordCommitment{
+		Index: idx,
+		Word:  strings.Trim(strings.TrimSpace(parts[1]), "\""),
+	}, nil
+}
+
+func parseTargetInitLine(line string) (string, error) {
+	content := strings.TrimSpace(line)
+	for _, prefix := range []string{"+TARGET:", "+MIGRATE:", "+PUBKEY:"} {
+		if strings.HasPrefix(content, prefix) {
+			content = strings.TrimSpace(strings.TrimPrefix(content, prefix))
+			break
+		}
+	}
+
+	if strings.Contains(content, "=") {
+		parts := strings.Split(content, ",")
+		for _, p := range parts {
+			kv := strings.SplitN(strings.TrimSpace(p), "=", 2)
+			if len(kv) == 2 {
+				k := strings.ToUpper(strings.TrimSpace(kv[0]))
+				v := strings.Trim(strings.TrimSpace(kv[1]), "\"")
+				if k == "PUB" || k == "PUBKEY" || k == "TARGET" || k == "KEY" {
+					return v, nil
+				}
+			}
+		}
+	}
+
+	pub := strings.Trim(strings.TrimSpace(content), "\"")
+	if pub == "" {
+		return "", fmt.Errorf("empty public key in line: %s", line)
+	}
+	return pub, nil
+}
+
+func parseWrapLine(line string, defaultSlot int, defaultTargetPub string) (*MigrationEnvelope, error) {
+	content := strings.TrimSpace(strings.TrimPrefix(line, "+WRAP:"))
+	env := &MigrationEnvelope{
+		SlotID:       defaultSlot,
+		EphemeralPub: defaultTargetPub,
+		Algorithm:    "EC_P256",
+	}
+
+	if strings.Contains(content, "=") {
+		parts := strings.Split(content, ",")
+		for _, p := range parts {
+			kv := strings.SplitN(strings.TrimSpace(p), "=", 2)
+			if len(kv) == 2 {
+				k := strings.ToUpper(strings.TrimSpace(kv[0]))
+				v := strings.Trim(strings.TrimSpace(kv[1]), "\"")
+				switch k {
+				case "SLOT", "SLOT_ID", "ID":
+					if id, err := strconv.Atoi(v); err == nil {
+						env.SlotID = id
+					}
+				case "ALGO", "ALGORITHM":
+					env.Algorithm = v
+				case "EPHEM", "EPHEMERAL", "PUB", "PUBKEY":
+					env.EphemeralPub = v
+				case "CIPHER", "ENCRYPTED", "KEY":
+					env.EncryptedKey = v
+				case "TAG", "AUTHTAG", "MAC":
+					env.AuthTag = v
+				case "NONCE", "IV":
+					env.Nonce = v
+				}
+			}
+		}
+		return env, nil
+	}
+
+	parts := strings.Split(content, ",")
+	if len(parts) >= 6 {
+		if id, err := strconv.Atoi(strings.TrimSpace(parts[0])); err == nil {
+			env.SlotID = id
+		}
+		env.Algorithm = strings.Trim(strings.TrimSpace(parts[1]), "\"")
+		env.EphemeralPub = strings.Trim(strings.TrimSpace(parts[2]), "\"")
+		env.EncryptedKey = strings.Trim(strings.TrimSpace(parts[3]), "\"")
+		env.AuthTag = strings.Trim(strings.TrimSpace(parts[4]), "\"")
+		env.Nonce = strings.Trim(strings.TrimSpace(parts[5]), "\"")
+		return env, nil
+	} else if len(parts) >= 4 {
+		// slot, cipher, tag, nonce (using defaults for algo and ephem)
+		if id, err := strconv.Atoi(strings.TrimSpace(parts[0])); err == nil {
+			env.SlotID = id
+		}
+		env.EncryptedKey = strings.Trim(strings.TrimSpace(parts[1]), "\"")
+		env.AuthTag = strings.Trim(strings.TrimSpace(parts[2]), "\"")
+		env.Nonce = strings.Trim(strings.TrimSpace(parts[3]), "\"")
+		return env, nil
+	}
+
+	return nil, fmt.Errorf("malformed +WRAP line: %s", line)
+}

@@ -28,6 +28,7 @@ func init() {
 	rootCmd.AddCommand(newInfoCmd())
 	rootCmd.AddCommand(newStatusCmd())
 	rootCmd.AddCommand(newAuthCmd())
+	rootCmd.AddCommand(newInitCmd())
 	rootCmd.AddCommand(newLockCmd())
 	rootCmd.AddCommand(newResetCmd())
 	rootCmd.AddCommand(newKeyCmd())

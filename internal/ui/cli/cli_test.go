@@ -13,11 +13,12 @@ func TestCLI_CommandStructure(t *testing.T) {
 		"info",
 		"status",
 		"auth",
+		"init",
 		"lock",
 		"reset",
 		"key",
 		"random",
-		"p11",
+		"pkcs11",
 		"echo",
 		"firmware",
 		"test",
@@ -27,6 +28,9 @@ func TestCLI_CommandStructure(t *testing.T) {
 	cmdMap := make(map[string]bool)
 	for _, c := range cmds {
 		cmdMap[c.Name()] = true
+		for _, alias := range c.Aliases {
+			cmdMap[alias] = true
+		}
 	}
 
 	for _, name := range expectedCmds {
@@ -34,13 +38,16 @@ func TestCLI_CommandStructure(t *testing.T) {
 			t.Errorf("expected root command %q to be registered", name)
 		}
 	}
+	if !cmdMap["p11"] {
+		t.Errorf("expected alias 'p11' for pkcs11 command group")
+	}
 }
 
 func TestCLI_KeySubcommands(t *testing.T) {
 	keyCmd := newKeyCmd()
 	subCmds := keyCmd.Commands()
 
-	expected := []string{"list", "generate", "pubkey", "sign"}
+	expected := []string{"list", "generate", "pubkey", "sign", "migrate"}
 	found := make(map[string]bool)
 	for _, c := range subCmds {
 		found[c.Name()] = true
@@ -57,7 +64,7 @@ func TestCLI_P11Subcommands(t *testing.T) {
 	p11Cmd := newP11Cmd()
 	subCmds := p11Cmd.Commands()
 
-	expected := []string{"info", "slots", "test"}
+	expected := []string{"info", "slots", "init-token", "keygen", "sign", "test"}
 	found := make(map[string]bool)
 	for _, c := range subCmds {
 		found[c.Name()] = true
@@ -65,7 +72,7 @@ func TestCLI_P11Subcommands(t *testing.T) {
 
 	for _, name := range expected {
 		if !found[name] {
-			t.Errorf("expected p11 subcommand %q to be registered", name)
+			t.Errorf("expected pkcs11 subcommand %q to be registered", name)
 		}
 	}
 }

@@ -18,6 +18,7 @@ func newKeyCmd() *cobra.Command {
 	keyCmd.AddCommand(newKeyGenerateCmd())
 	keyCmd.AddCommand(newKeyPubkeyCmd())
 	keyCmd.AddCommand(newKeySignCmd())
+	keyCmd.AddCommand(newKeyMigrateCmd())
 
 	return keyCmd
 }

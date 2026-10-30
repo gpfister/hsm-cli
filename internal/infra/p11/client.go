@@ -9,7 +9,8 @@ import (
 
 // P11Client provides an idiomatic Go interface to a PKCS#11 Cryptoki shared library.
 type P11Client struct {
-	lib *DynamicLibrary
+	lib        *DynamicLibrary
+	modulePath string
 
 	cInitialize       func(pInitArgs uintptr) uintptr
 	cFinalize         func(pReserved uintptr) uintptr
@@ -23,18 +24,31 @@ type P11Client struct {
 	cLogin            func(hSession uintptr, userType uintptr, pPin *byte, ulPinLen uintptr) uintptr
 	cLogout           func(hSession uintptr) uintptr
 	cGenerateRandom   func(hSession uintptr, pRandomData *byte, ulRandomLen uintptr) uintptr
+	cInitToken        func(slotID uintptr, pPin *byte, ulPinLen uintptr, pLabel *byte) uintptr
+	cGenerateKeyPair  func(hSession uintptr, pMechanism *CK_MECHANISM, pPublicKeyTemplate *CK_ATTRIBUTE, ulPublicKeyAttributeCount uintptr, pPrivateKeyTemplate *CK_ATTRIBUTE, ulPrivateKeyAttributeCount uintptr, phPublicKey *uintptr, phPrivateKey *uintptr) uintptr
+	cSignInit         func(hSession uintptr, pMechanism *CK_MECHANISM, hKey uintptr) uintptr
+	cSign             func(hSession uintptr, pData *byte, ulDataLen uintptr, pSignature *byte, pulSignatureLen *uintptr) uintptr
 }
 
 // NewP11Client loads the specified dynamic library and registers function bindings.
+// If modulePath is empty, it uses FindModule to auto-discover the library.
 func NewP11Client(modulePath string) (*P11Client, error) {
+	if modulePath == "" {
+		resolved, err := FindModule("")
+		if err != nil {
+			return nil, err
+		}
+		modulePath = resolved
+	}
+
 	lib, err := OpenLibrary(modulePath)
 	if err != nil {
 		return nil, err
 	}
 
-	client := &P11Client{lib: lib}
+	client := &P11Client{lib: lib, modulePath: modulePath}
 
-	// Register symbols
+	// Register core symbols
 	if err := client.bind("C_Initialize", &client.cInitialize); err != nil {
 		_ = lib.Close()
 		return nil, err
@@ -83,6 +97,12 @@ func NewP11Client(modulePath string) (*P11Client, error) {
 		_ = lib.Close()
 		return nil, err
 	}
+
+	// Optional extended cryptographic functions
+	_ = client.bind("C_InitToken", &client.cInitToken)
+	_ = client.bind("C_GenerateKeyPair", &client.cGenerateKeyPair)
+	_ = client.bind("C_SignInit", &client.cSignInit)
+	_ = client.bind("C_Sign", &client.cSign)
 
 	return client, nil
 }
@@ -240,4 +260,131 @@ func (c *P11Client) GenerateRandom(hSession uintptr, length int) ([]byte, error)
 	}
 
 	return buf, nil
+}
+
+// ModulePath returns the resolved file path of the loaded PKCS#11 module.
+func (c *P11Client) ModulePath() string {
+	return c.modulePath
+}
+
+// InitToken initializes a token on the specified slot via C_InitToken.
+func (c *P11Client) InitToken(slotID uintptr, pin string, label string) error {
+	if c.cInitToken == nil {
+		return fmt.Errorf("C_InitToken symbol not available in loaded PKCS#11 provider")
+	}
+
+	pinBytes := []byte(pin)
+	var pinPtr *byte
+	if len(pinBytes) > 0 {
+		pinPtr = &pinBytes[0]
+	}
+
+	labelBytes := make([]byte, 32)
+	copy(labelBytes, []byte(label))
+	for i := len(label); i < 32; i++ {
+		labelBytes[i] = ' '
+	}
+
+	rv := c.cInitToken(slotID, pinPtr, uintptr(len(pinBytes)), &labelBytes[0])
+	return RVError(fmt.Sprintf("C_InitToken(slot=%d)", slotID), rv)
+}
+
+// GenerateKeyPair generates an ECDSA keypair on the active session via C_GenerateKeyPair.
+func (c *P11Client) GenerateKeyPair(hSession uintptr, keyID int, label string) (uintptr, uintptr, error) {
+	if c.cGenerateKeyPair == nil {
+		return 0, 0, fmt.Errorf("C_GenerateKeyPair symbol not available in loaded PKCS#11 provider")
+	}
+
+	mech := CK_MECHANISM{
+		Mechanism: CKM_EC_KEY_PAIR_GEN,
+	}
+
+	var pubTemplates []CK_ATTRIBUTE
+	var privTemplates []CK_ATTRIBUTE
+
+	var keyIDByte byte
+	if keyID > 0 {
+		keyIDByte = byte(keyID)
+		pubTemplates = append(pubTemplates, CK_ATTRIBUTE{
+			Type:     CKA_ID,
+			Value:    uintptr(unsafe.Pointer(&keyIDByte)),
+			ValueLen: 1,
+		})
+		privTemplates = append(privTemplates, CK_ATTRIBUTE{
+			Type:     CKA_ID,
+			Value:    uintptr(unsafe.Pointer(&keyIDByte)),
+			ValueLen: 1,
+		})
+	}
+
+	var labelBytes []byte
+	if label != "" {
+		labelBytes = []byte(label)
+		pubTemplates = append(pubTemplates, CK_ATTRIBUTE{
+			Type:     CKA_LABEL,
+			Value:    uintptr(unsafe.Pointer(&labelBytes[0])),
+			ValueLen: uint64(len(labelBytes)),
+		})
+		privTemplates = append(privTemplates, CK_ATTRIBUTE{
+			Type:     CKA_LABEL,
+			Value:    uintptr(unsafe.Pointer(&labelBytes[0])),
+			ValueLen: uint64(len(labelBytes)),
+		})
+	}
+
+	var pubPtr *CK_ATTRIBUTE
+	if len(pubTemplates) > 0 {
+		pubPtr = &pubTemplates[0]
+	}
+	var privPtr *CK_ATTRIBUTE
+	if len(privTemplates) > 0 {
+		privPtr = &privTemplates[0]
+	}
+
+	var hPub, hPriv uintptr
+	rv := c.cGenerateKeyPair(hSession, &mech, pubPtr, uintptr(len(pubTemplates)), privPtr, uintptr(len(privTemplates)), &hPub, &hPriv)
+	if rv != CKR_OK {
+		return 0, 0, RVError("C_GenerateKeyPair", rv)
+	}
+
+	return hPub, hPriv, nil
+}
+
+// Sign initializes and computes an ECDSA signature over data using C_SignInit and C_Sign.
+func (c *P11Client) Sign(hSession uintptr, hKey uintptr, mechanism uint64, data []byte) ([]byte, error) {
+	if c.cSignInit == nil || c.cSign == nil {
+		return nil, fmt.Errorf("C_SignInit/C_Sign symbols not available in loaded PKCS#11 provider")
+	}
+
+	mech := CK_MECHANISM{
+		Mechanism: mechanism,
+	}
+
+	rv := c.cSignInit(hSession, &mech, hKey)
+	if rv != CKR_OK {
+		return nil, RVError(fmt.Sprintf("C_SignInit(hKey=%d)", hKey), rv)
+	}
+
+	var dataPtr *byte
+	if len(data) > 0 {
+		dataPtr = &data[0]
+	}
+
+	var sigLen uintptr
+	rv = c.cSign(hSession, dataPtr, uintptr(len(data)), nil, &sigLen)
+	if rv != CKR_OK {
+		return nil, RVError("C_Sign (size query)", rv)
+	}
+
+	if sigLen == 0 {
+		sigLen = 64
+	}
+
+	sig := make([]byte, sigLen)
+	rv = c.cSign(hSession, dataPtr, uintptr(len(data)), &sig[0], &sigLen)
+	if rv != CKR_OK {
+		return nil, RVError("C_Sign", rv)
+	}
+
+	return sig[:sigLen], nil
 }
