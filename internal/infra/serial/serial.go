@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gpfister/nrf52840-hms-cli/internal/domain"
-	"github.com/gpfister/nrf52840-hms-cli/internal/infra/protocol"
+	"github.com/gpfister/nrf52840-hsm-cli/internal/domain"
+	"github.com/gpfister/nrf52840-hsm-cli/internal/infra/protocol"
 	"go.bug.st/serial"
 )
 

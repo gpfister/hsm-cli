@@ -1,19 +1,19 @@
-# nrf52840-hms-cli (`hmsutil`)
+# nrf52840-hsm-cli (`hsmutil`)
 
-Cross-platform command-line utility and interactive terminal dashboard (TUI) for the **nRF52840 Hardware Security Module (HMS)** dongle, built in Go using Cobra and BubbleTea following Clean Architecture.
+Cross-platform command-line utility and interactive terminal dashboard (TUI) for the **nRF52840 Hardware Security Module (HSM)** dongle, built in Go using Cobra and BubbleTea following Clean Architecture.
 
 ## Features
 - **Firmware Management**:
-  - `hmsutil firmware info`: Display active firmware version, active partition slot, and SHA-256 digest.
-  - `hmsutil firmware update --file <file_path>`: Stream chunked signed firmware images into MCUboot candidate slot.
+  - `hsmutil firmware info`: Display active firmware version, active partition slot, and SHA-256 digest.
+  - `hsmutil firmware update --file <file_path>`: Stream chunked signed firmware images into MCUboot candidate slot.
 - **Device Management**:
-  - `hmsutil info`: Retrieve device information, serial number, algorithms.
-  - `hmsutil echo [message]`: Echo packet roundtrip latency test.
-  - `hmsutil unlock` / `hmsutil auth`: Authenticate session, unlocking HSM (LED transitions to solid GREEN).
-  - `hmsutil lock`: Terminate session and lock HSM (LED transitions to solid RED).
-  - `hmsutil reset`: Reset state back to unconfigured (LED transitions to slowly pulsating BLUE).
-  - `hmsutil test`: Automated end-to-end integration test suite.
-  - `hmsutil tui`: Interactive terminal dashboard powered by BubbleTea.
+  - `hsmutil info`: Retrieve device information, serial number, algorithms.
+  - `hsmutil echo [message]`: Echo packet roundtrip latency test.
+  - `hsmutil unlock` / `hsmutil auth`: Authenticate session, unlocking HSM (LED transitions to solid GREEN).
+  - `hsmutil lock`: Terminate session and lock HSM (LED transitions to solid RED).
+  - `hsmutil reset`: Reset state back to unconfigured (LED transitions to slowly pulsating BLUE).
+  - `hsmutil test`: Automated end-to-end integration test suite.
+  - `hsmutil tui`: Interactive terminal dashboard powered by BubbleTea.
 
 ## Supported Architectures
 - macOS (`darwin/arm64`)
@@ -22,7 +22,7 @@ Cross-platform command-line utility and interactive terminal dashboard (TUI) for
 
 ## Build & Test
 ```bash
-make build       # Build host executable in bin/hmsutil
+make build       # Build host executable in bin/hsmutil
 make build-all   # Cross-compile for all 5 platforms
 make test        # Run unit tests
 ```

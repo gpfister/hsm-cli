@@ -4,18 +4,18 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/gpfister/nrf52840-hms-cli/internal/infra/serial"
-	"github.com/gpfister/nrf52840-hms-cli/internal/usecases"
+	"github.com/gpfister/nrf52840-hsm-cli/internal/infra/serial"
+	"github.com/gpfister/nrf52840-hsm-cli/internal/usecases"
 	"github.com/spf13/cobra"
 )
 
 var (
 	portFlag string
 	rootCmd  = &cobra.Command{
-		Use:   "hmsutil",
-		Short: "hmsutil — CLI & TUI tool for nRF52840 Hardware Security Module Dongle",
-		Long: `hmsutil is the command-line interface for managing and testing
-the nRF52840-based Hardware Security Module (HMS) USB dongle, supporting
+		Use:   "hsmutil",
+		Short: "hsmutil — CLI & TUI tool for nRF52840 Hardware Security Module Dongle",
+		Long: `hsmutil is the command-line interface for managing and testing
+the nRF52840-based Hardware Security Module (HSM) USB dongle, supporting
 YubiHSM 2 API commands, dual-stage firmware updates, and interactive TUI.`,
 	}
 )

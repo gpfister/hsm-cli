@@ -3,7 +3,7 @@ package protocol
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/gpfister/nrf52840-hms-cli/internal/domain"
+	"github.com/gpfister/nrf52840-hsm-cli/internal/domain"
 )
 
 const HeaderSize = 3

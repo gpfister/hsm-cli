@@ -42,7 +42,7 @@ func newEchoCmd() *cobra.Command {
 		Use:   "echo [message]",
 		Short: "Send echo packet to dongle to verify round-trip latency",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			msg := "Ping from hmsutil"
+			msg := "Ping from hsmutil"
 			if len(args) > 0 {
 				msg = args[0]
 			}

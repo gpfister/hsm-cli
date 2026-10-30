@@ -3,7 +3,7 @@ package protocol
 import (
 	"bytes"
 	"testing"
-	"github.com/gpfister/nrf52840-hms-cli/internal/domain"
+	"github.com/gpfister/nrf52840-hsm-cli/internal/domain"
 )
 
 func TestEncodeDecodeEcho(t *testing.T) {

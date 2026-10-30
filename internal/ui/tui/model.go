@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/gpfister/nrf52840-hms-cli/internal/domain"
-	"github.com/gpfister/nrf52840-hms-cli/internal/usecases"
+	"github.com/gpfister/nrf52840-hsm-cli/internal/domain"
+	"github.com/gpfister/nrf52840-hsm-cli/internal/usecases"
 )
 
 var (

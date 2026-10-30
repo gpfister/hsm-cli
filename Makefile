@@ -1,18 +1,18 @@
 # ==============================================================================
-# nrf52840-hms-cli (hmsutil) Makefile
+# nrf52840-hsm-cli (hsmutil) Makefile
 # Cross-platform compilation for macOS, Linux, and Windows
 # ==============================================================================
 
 SHELL := /bin/bash
-BINARY_NAME := hmsutil
+BINARY_NAME := hsmutil
 BIN_DIR := bin
-SRC_PKG := ./cmd/hmsutil
+SRC_PKG := ./cmd/hsmutil
 
 .PHONY: help all build build-all test clean
 
 help:
 	@echo "=================================================================="
-	@echo "                   hmsutil CLI Build Automation                   "
+	@echo "                   hsmutil CLI Build Automation                   "
 	@echo "=================================================================="
 	@echo "Targets:"
 	@echo "  make build          Build '$(BINARY_NAME)' for current host"

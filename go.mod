@@ -1,4 +1,4 @@
-module github.com/gpfister/nrf52840-hms-cli
+module github.com/gpfister/nrf52840-hsm-cli
 
 go 1.27.3
 
