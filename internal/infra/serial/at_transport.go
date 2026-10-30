@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,58 +27,15 @@ type SerialATTransport struct {
 	mu   sync.Mutex
 }
 
-// FindDonglePorts scans for available dongle serial ports.
-// Precedence:
-// 1. NRF52840_HSM_PORT environment variable (e.g. for mock PTY)
-// 2. USB detailed discovery targeting VID 0x1209 and PID 0x0001 (pid.codes nRF52840 HSM Dongle)
-// 3. Fallback to serial ports matching standard USB CDC-ACM device naming
+// FindDonglePorts scans for available dongle serial ports, prioritizing AT data channels (suffix 3).
 func FindDonglePorts() ([]string, error) {
-	if envPort := os.Getenv("NRF52840_HSM_PORT"); envPort != "" {
-		return []string{envPort}, nil
-	}
-
-	detailedMatches, err := getDetailedMatchingPorts("1209", "0001")
-	if err == nil && len(detailedMatches) > 0 {
-		return detailedMatches, nil
-	}
-
-	list, err := serial.GetPortsList()
-	if err != nil {
-		return nil, err
-	}
-
-	var fallbackMatches []string
-	for _, name := range list {
-		lower := strings.ToLower(name)
-		if strings.Contains(lower, "usbmodem") || strings.Contains(lower, "ttyacm") || strings.Contains(lower, "com") {
-			fallbackMatches = append(fallbackMatches, name)
-		}
-	}
-
-	if len(fallbackMatches) > 0 {
-		return fallbackMatches, nil
-	}
-
-	return list, nil
+	return FindDonglePortsTargeting("")
 }
 
 // AutoDiscoverPort locates and selects the HSM AT command serial port.
-// In a dual CDC-ACM device, port 0 is the logger console and port 1 is the dedicated AT channel.
-// We pick the last discovered matching port.
+// Prioritizes suffix 3 (AT data channel) over suffix 1 (Console logging).
 func AutoDiscoverPort() (string, error) {
-	if envPort := os.Getenv("NRF52840_HSM_PORT"); envPort != "" {
-		return envPort, nil
-	}
-
-	ports, err := FindDonglePorts()
-	if err != nil {
-		return "", fmt.Errorf("failed to scan serial ports: %w", err)
-	}
-	if len(ports) == 0 {
-		return "", domain.ErrDeviceNotFound
-	}
-
-	return ports[len(ports)-1], nil
+	return AutoDiscoverPortTargeting("")
 }
 
 // OpenAT opens a serial connection to the specified port path at 115200 8N1.

@@ -10,6 +10,7 @@ func TestCLI_CommandStructure(t *testing.T) {
 	cmds := rootCmd.Commands()
 
 	expectedCmds := []string{
+		"devices",
 		"info",
 		"status",
 		"auth",
@@ -40,6 +41,27 @@ func TestCLI_CommandStructure(t *testing.T) {
 	}
 	if !cmdMap["p11"] {
 		t.Errorf("expected alias 'p11' for pkcs11 command group")
+	}
+	if !cmdMap["list"] {
+		t.Errorf("expected alias 'list' for devices command")
+	}
+}
+
+func TestCLI_PersistentFlags(t *testing.T) {
+	portFlag := rootCmd.PersistentFlags().Lookup("port")
+	if portFlag == nil {
+		t.Fatalf("expected --port persistent flag to be registered")
+	}
+	if portFlag.Shorthand != "p" {
+		t.Errorf("expected shorthand 'p' for --port, got %q", portFlag.Shorthand)
+	}
+
+	serialFlag := rootCmd.PersistentFlags().Lookup("serial")
+	if serialFlag == nil {
+		t.Fatalf("expected --serial persistent flag to be registered")
+	}
+	if serialFlag.Shorthand != "s" {
+		t.Errorf("expected shorthand 's' for --serial, got %q", serialFlag.Shorthand)
 	}
 }
 

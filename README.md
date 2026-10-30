@@ -7,7 +7,8 @@ Supports direct AT-style ASCII protocol communication over dedicated CDC-ACM ser
 ## Features
 
 ### Device & Session Management
-- `hsmutil info`: Query device build version, hardware model, unique device UID, and active bootloader stages (`AT+INFO?`).
+- `hsmutil devices`: List connected nRF52840 HSM dongles with detected BLE addresses, AT data ports, console ports, and USB descriptors (Alias: `hsmutil list`, supports `--json`).
+- `hsmutil info`: Query device build version, hardware model, unique device UID, active port, and bootloader stages (`AT+INFO?`).
 - `hsmutil status`: Inspect active authentication state, remaining PIN retries, and stored key count (`AT+STATUS?`).
 - `hsmutil auth --pin <pin>`: Authenticate User PIN, unlocking cryptographic operations (`AT+AUTH=<pin>`). (Alias: `unlock`).
 - `hsmutil lock`: Invalidate active session and return HSM to locked state (`AT+LOCK`).
@@ -32,12 +33,17 @@ Supports direct AT-style ASCII protocol communication over dedicated CDC-ACM ser
 - `hsmutil test`: Automated HSM integration self-test suite.
 - `hsmutil tui`: Interactive terminal dashboard powered by BubbleTea.
 
-## Serial Port Auto-Discovery & Virtual PTY Override
+## Serial Port Auto-Discovery & Targeting
 The CLI automatically searches for nRF52840 HSM dongles matching Vendor ID `0x1209` and Product ID `0x0001` (pid.codes nRF52840 HSM Dongle) at 115200 8N1.
 
-For testing with virtual PTY simulators or targeting custom ports:
-- **CLI Flag**: `hsmutil --port /dev/cu.usbmodem1101 <command>`
-- **Environment Variable**: `export NRF52840_HSM_PORT=/tmp/mock-hsm-pty`
+- **Dual CDC-ACM Port Prioritization**: Automatically prioritizes suffix `3` (`/dev/tty.usbmodem...3` / AT data interface) over suffix `1` (Zephyr console logger interface) on macOS and Linux CDC-ACM serial ports.
+- **BLE Address Matching**: Discovers and matches dongles formatted as `/dev/tty.usbmodem<BLE_ADDR>3`.
+- **Targeting by Serial / BLE Address**:
+  - **CLI Flag**: `hsmutil --serial F4CE368F12AB <command>` (shorthand `-s`)
+  - **Environment Variable**: `export NRF52840_HSM_SERIAL=F4CE368F12AB`
+- **Port Path Override**:
+  - **CLI Flag**: `hsmutil --port /dev/tty.usbmodem31424103 <command>` (shorthand `-p`)
+  - **Environment Variable**: `export NRF52840_HSM_PORT=/tmp/mock-hsm-pty` (e.g. for virtual PTY testing)
 
 ## Supported Architectures
 - macOS (`darwin/arm64`)

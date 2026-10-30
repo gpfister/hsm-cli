@@ -3,11 +3,90 @@ package cli
 import (
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
+	"github.com/gpfister/nrf52840-hsm-cli/internal/domain"
+	"github.com/gpfister/nrf52840-hsm-cli/internal/infra/serial"
 	"github.com/spf13/cobra"
 )
+
+func newDevicesCmd() *cobra.Command {
+	var jsonOutput bool
+
+	cmd := &cobra.Command{
+		Use:     "devices",
+		Aliases: []string{"list"},
+		Short:   "List connected nRF52840 HSM dongles with detected BLE addresses and ports",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dongles, err := serial.EnumerateDongles()
+			if err != nil {
+				return fmt.Errorf("failed to enumerate dongles: %w", err)
+			}
+
+			target := serialFlag
+			if target == "" {
+				target = os.Getenv("NRF52840_HSM_SERIAL")
+			}
+			if target != "" {
+				var filtered []domain.DiscoveredDongle
+				normTarget := serial.NormalizeSerial(target)
+				for _, d := range dongles {
+					if serial.NormalizeSerial(d.Serial) == normTarget ||
+						strings.HasSuffix(serial.NormalizeSerial(d.Serial), normTarget) ||
+						strings.Contains(strings.ToUpper(d.DataPort), normTarget) {
+						filtered = append(filtered, d)
+					}
+				}
+				dongles = filtered
+			}
+
+			if jsonOutput {
+				data, err := json.MarshalIndent(dongles, "", "  ")
+				if err != nil {
+					return err
+				}
+				fmt.Println(string(data))
+				return nil
+			}
+
+			if len(dongles) == 0 {
+				if target != "" {
+					fmt.Printf("No nRF52840 HSM dongles detected matching %q.\n", target)
+				} else {
+					fmt.Println("No nRF52840 HSM dongles detected.")
+				}
+				return nil
+			}
+
+			fmt.Printf("Connected nRF52840 HSM Dongles (%d detected):\n\n", len(dongles))
+			for i, d := range dongles {
+				fmt.Printf("[%d] Serial / BLE:  %s\n", i+1, d.Serial)
+				fmt.Printf("    AT Data Port:  %s\n", d.DataPort)
+				if d.ConsolePort != "" {
+					fmt.Printf("    Console Port:  %s\n", d.ConsolePort)
+				}
+				if d.VID != "" && d.PID != "" {
+					fmt.Printf("    USB ID:        %s:%s", d.VID, d.PID)
+					if d.Product != "" {
+						fmt.Printf(" (%s)", d.Product)
+					}
+					fmt.Println()
+				}
+				if i < len(dongles)-1 {
+					fmt.Println()
+				}
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output discovered devices in JSON format")
+	return cmd
+}
 
 func newInfoCmd() *cobra.Command {
 	return &cobra.Command{
@@ -28,6 +107,7 @@ func newInfoCmd() *cobra.Command {
 			fmt.Println("==================================================")
 			fmt.Println("              nRF52840 HSM Device Info            ")
 			fmt.Println("==================================================")
+			fmt.Printf(" Port:           %s\n", client.Transport().PortName())
 			if info.Firmware != "" {
 				fmt.Printf(" Firmware:       %s\n", info.Firmware)
 			} else {
