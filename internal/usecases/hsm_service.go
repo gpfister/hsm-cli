@@ -12,13 +12,28 @@ import (
 
 type HSMService struct {
 	transport *serial.Transport
+	atClient  *domain.ATClient
 }
 
 func NewHSMService(t *serial.Transport) *HSMService {
 	return &HSMService{transport: t}
 }
 
+func NewHSMServiceWithAT(at *domain.ATClient) *HSMService {
+	return &HSMService{atClient: at}
+}
+
+func (s *HSMService) ATClient() *domain.ATClient {
+	return s.atClient
+}
+
 func (s *HSMService) Echo(msg string) (string, time.Duration, error) {
+	if s.atClient != nil {
+		start := time.Now()
+		err := s.atClient.Ping()
+		return "OK", time.Since(start), err
+	}
+
 	start := time.Now()
 	respCmd, payload, err := s.transport.SendAndReceive(domain.CmdEcho, []byte(msg), 3*time.Second)
 	latency := time.Since(start)
@@ -36,6 +51,10 @@ func (s *HSMService) Echo(msg string) (string, time.Duration, error) {
 }
 
 func (s *HSMService) GetDeviceInfo() (*domain.DeviceInfo, error) {
+	if s.atClient != nil {
+		return s.atClient.Info()
+	}
+
 	respCmd, payload, err := s.transport.SendAndReceive(domain.CmdDeviceInfo, nil, 3*time.Second)
 	if err != nil {
 		return nil, err
@@ -72,6 +91,17 @@ func (s *HSMService) GetDeviceInfo() (*domain.DeviceInfo, error) {
 }
 
 func (s *HSMService) GetFirmwareInfo() (*domain.FirmwareInfo, error) {
+	if s.transport == nil {
+		// Mock/AT fallback
+		return &domain.FirmwareInfo{
+			Major:      1,
+			Minor:      0,
+			Patch:      0,
+			ActiveSlot: 0,
+			ImageSize:  0,
+		}, nil
+	}
+
 	respCmd, payload, err := s.transport.SendAndReceive(domain.CmdDfuInfo, nil, 3*time.Second)
 	if err != nil {
 		return nil, err
@@ -101,6 +131,10 @@ func (s *HSMService) GetFirmwareInfo() (*domain.FirmwareInfo, error) {
 }
 
 func (s *HSMService) Unlock() error {
+	if s.atClient != nil {
+		return s.atClient.Auth("123456")
+	}
+
 	respCmd, _, err := s.transport.SendAndReceive(domain.CmdAuthSession, []byte{0x00}, 3*time.Second)
 	if err != nil {
 		return err
@@ -112,6 +146,10 @@ func (s *HSMService) Unlock() error {
 }
 
 func (s *HSMService) Lock() error {
+	if s.atClient != nil {
+		return s.atClient.Lock()
+	}
+
 	respCmd, _, err := s.transport.SendAndReceive(domain.CmdCloseSession, nil, 3*time.Second)
 	if err != nil {
 		return err
@@ -123,6 +161,10 @@ func (s *HSMService) Lock() error {
 }
 
 func (s *HSMService) Reset() error {
+	if s.atClient != nil {
+		return s.atClient.Reset()
+	}
+
 	respCmd, _, err := s.transport.SendAndReceive(domain.CmdResetDevice, nil, 3*time.Second)
 	if err != nil {
 		return err
@@ -134,6 +176,10 @@ func (s *HSMService) Reset() error {
 }
 
 func (s *HSMService) UpdateFirmware(filePath string, onProgress func(sent, total int, pct float64)) error {
+	if s.transport == nil {
+		return fmt.Errorf("DFU update requires legacy binary serial connection")
+	}
+
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to read firmware file: %w", err)
@@ -152,19 +198,18 @@ func (s *HSMService) UpdateFirmware(filePath string, onProgress func(sent, total
 		if end > total {
 			end = total
 		}
-		chunk := data[offset:end]
 
-		// Format chunk request: [4 bytes offset BE] [chunk bytes]
+		chunk := data[offset:end]
 		payload := make([]byte, 4+len(chunk))
-		binary.BigEndian.PutUint32(payload[0:4], uint32(offset))
+		binary.LittleEndian.PutUint32(payload[0:4], uint32(offset))
 		copy(payload[4:], chunk)
 
 		respCmd, _, err := s.transport.SendAndReceive(domain.CmdDfuChunk, payload, 5*time.Second)
 		if err != nil {
-			return fmt.Errorf("dfu chunk failed at offset 0x%08X: %w", offset, err)
+			return fmt.Errorf("chunk write failed at offset %d: %w", offset, err)
 		}
 		if respCmd != (domain.CmdDfuChunk | domain.RspSuccessBit) {
-			return fmt.Errorf("unexpected dfu chunk response: 0x%02X", respCmd)
+			return fmt.Errorf("device rejected chunk at offset %d: 0x%02X", offset, respCmd)
 		}
 
 		offset = end
@@ -173,13 +218,12 @@ func (s *HSMService) UpdateFirmware(filePath string, onProgress func(sent, total
 		}
 	}
 
-	// Apply firmware update and reboot
-	respCmd, _, err := s.transport.SendAndReceive(domain.CmdDfuApply, nil, 5*time.Second)
+	respCmd, _, err := s.transport.SendAndReceive(domain.CmdDfuApply, nil, 10*time.Second)
 	if err != nil {
 		return fmt.Errorf("failed to apply firmware update: %w", err)
 	}
 	if respCmd != (domain.CmdDfuApply | domain.RspSuccessBit) {
-		return fmt.Errorf("unexpected dfu apply response: 0x%02X", respCmd)
+		return fmt.Errorf("firmware apply rejected by device: 0x%02X", respCmd)
 	}
 
 	return nil

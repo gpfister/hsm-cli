@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/gpfister/nrf52840-hsm-cli/internal/domain"
 	"github.com/gpfister/nrf52840-hsm-cli/internal/infra/serial"
 	"github.com/gpfister/nrf52840-hsm-cli/internal/usecases"
 	"github.com/spf13/cobra"
@@ -16,19 +17,28 @@ var (
 		Short: "hsmutil — CLI & TUI tool for nRF52840 Hardware Security Module Dongle",
 		Long: `hsmutil is the command-line interface for managing and testing
 the nRF52840-based Hardware Security Module (HSM) USB dongle, supporting
-YubiHSM 2 API commands, dual-stage firmware updates, and interactive TUI.`,
+AT-style ASCII serial protocol, PKCS#11 diagnostics, and dual-stage secure boot.`,
 	}
 )
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&portFlag, "port", "p", "", "Serial port of HSM data interface (auto-detected if omitted)")
+	rootCmd.PersistentFlags().StringVarP(&portFlag, "port", "p", "", "Serial port of HSM data interface (auto-detected if omitted or from NRF52840_HSM_PORT)")
 
-	rootCmd.AddCommand(newFirmwareCmd())
+	// AT protocol device commands
 	rootCmd.AddCommand(newInfoCmd())
-	rootCmd.AddCommand(newEchoCmd())
+	rootCmd.AddCommand(newStatusCmd())
 	rootCmd.AddCommand(newAuthCmd())
 	rootCmd.AddCommand(newLockCmd())
 	rootCmd.AddCommand(newResetCmd())
+	rootCmd.AddCommand(newKeyCmd())
+	rootCmd.AddCommand(newRandomCmd())
+	rootCmd.AddCommand(newEchoCmd())
+
+	// PKCS#11 diagnostics
+	rootCmd.AddCommand(newP11Cmd())
+
+	// Firmware DFU, integration test, and interactive TUI
+	rootCmd.AddCommand(newFirmwareCmd())
 	rootCmd.AddCommand(newTestCmd())
 	rootCmd.AddCommand(newTUICmd())
 }
@@ -40,7 +50,36 @@ func Execute() {
 	}
 }
 
+func getATClient() (*domain.ATClient, func(), error) {
+	portPath := portFlag
+	if portPath == "" {
+		discovered, err := serial.AutoDiscoverPort()
+		if err != nil {
+			return nil, nil, fmt.Errorf("no nRF52840 HSM Dongle detected: %w (plug in device, specify --port, or set NRF52840_HSM_PORT)", err)
+		}
+		portPath = discovered
+	}
+
+	transport, err := serial.OpenAT(portPath)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cleanup := func() {
+		_ = transport.Close()
+	}
+
+	return domain.NewATClient(transport), cleanup, nil
+}
+
 func getService() (*usecases.HSMService, func(), error) {
+	// First attempt AT client connection
+	atClient, atCleanup, atErr := getATClient()
+	if atErr == nil {
+		return usecases.NewHSMServiceWithAT(atClient), atCleanup, nil
+	}
+
+	// Fallback to legacy binary serial transport if AT fails
 	portPath := portFlag
 	if portPath == "" {
 		ports, err := serial.FindDonglePorts()
@@ -50,9 +89,7 @@ func getService() (*usecases.HSMService, func(), error) {
 		if len(ports) == 0 {
 			return nil, nil, fmt.Errorf("no nRF52840 HSM Dongle detected. Please plug in the device or specify --port")
 		}
-		// In dual CDC-ACM composite device, typically the second port is UART1 (HSM data)
 		portPath = ports[len(ports)-1]
-		fmt.Printf("[INFO] Auto-selected dongle port: %s\n", portPath)
 	}
 
 	transport, err := serial.Open(portPath)

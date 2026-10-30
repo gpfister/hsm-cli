@@ -3,7 +3,6 @@ package serial
 import (
 	"encoding/binary"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/gpfister/nrf52840-hsm-cli/internal/domain"
@@ -14,28 +13,6 @@ import (
 type Transport struct {
 	port serial.Port
 	path string
-}
-
-// FindDonglePorts finds potential serial ports for the dongle
-func FindDonglePorts() ([]string, error) {
-	list, err := serial.GetPortsList()
-	if err != nil {
-		return nil, err
-	}
-
-	var matches []string
-	for _, name := range list {
-		lower := strings.ToLower(name)
-		if strings.Contains(lower, "usbmodem") || strings.Contains(lower, "ttyacm") || strings.Contains(lower, "com") {
-			matches = append(matches, name)
-		}
-	}
-
-	if len(matches) == 0 {
-		return list, nil
-	}
-
-	return matches, nil
 }
 
 func Open(portName string) (*Transport, error) {

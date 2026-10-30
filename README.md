@@ -1,19 +1,43 @@
 # nrf52840-hsm-cli (`hsmutil`)
 
-Cross-platform command-line utility and interactive terminal dashboard (TUI) for the **nRF52840 Hardware Security Module (HSM)** dongle, built in Go using Cobra and BubbleTea following Clean Architecture.
+Cross-platform command-line utility and interactive terminal dashboard (TUI) for the **nRF52840 Hardware Security Module (HSM)** dongle (`PCA10059`), built in Go using Cobra and BubbleTea following Clean Architecture.
+
+Supports direct AT-style ASCII protocol communication over dedicated CDC-ACM serial endpoints (`VID 0x1209`, `PID 0x0001`), PKCS#11 Cryptoki provider diagnostics, key generation and management, and dual-stage secure boot updates.
 
 ## Features
-- **Firmware Management**:
-  - `hsmutil firmware info`: Display active firmware version, active partition slot, and SHA-256 digest.
-  - `hsmutil firmware update --file <file_path>`: Stream chunked signed firmware images into MCUboot candidate slot.
-- **Device Management**:
-  - `hsmutil info`: Retrieve device information, serial number, algorithms.
-  - `hsmutil echo [message]`: Echo packet roundtrip latency test.
-  - `hsmutil unlock` / `hsmutil auth`: Authenticate session, unlocking HSM (LED transitions to solid GREEN).
-  - `hsmutil lock`: Terminate session and lock HSM (LED transitions to solid RED).
-  - `hsmutil reset`: Reset state back to unconfigured (LED transitions to slowly pulsating BLUE).
-  - `hsmutil test`: Automated end-to-end integration test suite.
-  - `hsmutil tui`: Interactive terminal dashboard powered by BubbleTea.
+
+### Device & Session Management
+- `hsmutil info`: Query device build version, hardware model, unique device UID, and active bootloader stages (`AT+INFO?`).
+- `hsmutil status`: Inspect active authentication state, remaining PIN retries, and stored key count (`AT+STATUS?`).
+- `hsmutil auth --pin <pin>`: Authenticate User PIN, unlocking cryptographic operations (`AT+AUTH=<pin>`). (Alias: `unlock`).
+- `hsmutil lock`: Invalidate active session and return HSM to locked state (`AT+LOCK`).
+- `hsmutil reset`: Reset token session state and clear volatile context (`AT+RESET`).
+- `hsmutil echo [message]`: Ping HSM dongle and verify roundtrip serial communication latency (`AT`).
+- `hsmutil random --len <n>`: Generate hardware random bytes from CryptoCell CC310 TRNG (`AT+RANDOM=<len>`).
+
+### Hardware Key Management
+- `hsmutil key list`: Enumerate stored EC key slots (`AT+SLOTS?`).
+- `hsmutil key generate --slot <id> --algo EC_P256`: Generate NIST P-256 (`secp256r1`) keypair using hardware TRNG (`AT+KEYGEN=<id>,EC_P256`).
+- `hsmutil key pubkey --slot <id>`: Read uncompressed 65-byte public key point (`AT+PUBKEY=<id>`).
+- `hsmutil key sign --slot <id> --hash <hex>`: Compute hardware ECDSA signature over 32-byte SHA-256 hash (`AT+SIGN=<id>,<hash>`).
+
+### PKCS#11 Provider Diagnostics
+- `hsmutil p11 info --module <path>`: Inspect Cryptoki version, manufacturer, and library description.
+- `hsmutil p11 slots --module <path>`: Enumerate provider slots, token information, and supported mechanisms (`CKM_EC_KEY_PAIR_GEN`, `CKM_ECDSA`, `CKM_ECDSA_SHA256`).
+- `hsmutil p11 test --module <path> --pin <pin>`: Automated end-to-end diagnostic suite verifying library initialization, slot discovery, session management, user login, random generation, and clean finalization.
+
+### Firmware & Integration Testing
+- `hsmutil firmware info`: Query active firmware version and MCUboot partition slot.
+- `hsmutil firmware update --file <bin>`: Stream chunked signed firmware images into candidate flash slot.
+- `hsmutil test`: Automated HSM integration self-test suite.
+- `hsmutil tui`: Interactive terminal dashboard powered by BubbleTea.
+
+## Serial Port Auto-Discovery & Virtual PTY Override
+The CLI automatically searches for nRF52840 HSM dongles matching Vendor ID `0x1209` and Product ID `0x0001` (pid.codes nRF52840 HSM Dongle) at 115200 8N1.
+
+For testing with virtual PTY simulators or targeting custom ports:
+- **CLI Flag**: `hsmutil --port /dev/cu.usbmodem1101 <command>`
+- **Environment Variable**: `export NRF52840_HSM_PORT=/tmp/mock-hsm-pty`
 
 ## Supported Architectures
 - macOS (`darwin/arm64`)
@@ -23,6 +47,6 @@ Cross-platform command-line utility and interactive terminal dashboard (TUI) for
 ## Build & Test
 ```bash
 make build       # Build host executable in bin/hsmutil
-make build-all   # Cross-compile for all 5 platforms
+make build-all   # Cross-compile across all 5 target architectures
 make test        # Run unit tests
 ```
