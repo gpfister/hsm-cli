@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -63,6 +64,10 @@ func getATClient() (*domain.ATClient, func(), error) {
 		}
 		discovered, err := serial.AutoDiscoverPortTargeting(targetSerial)
 		if err != nil {
+			var multErr *domain.ErrMultipleDevicesDetected
+			if errors.As(err, &multErr) {
+				return nil, nil, multErr
+			}
 			return nil, nil, fmt.Errorf("no nRF52840 HSM Dongle detected: %w (plug in device, specify --port or --serial, or set NRF52840_HSM_PORT/NRF52840_HSM_SERIAL)", err)
 		}
 		portPath = discovered
@@ -85,6 +90,11 @@ func getService() (*usecases.HSMService, func(), error) {
 	atClient, atCleanup, atErr := getATClient()
 	if atErr == nil {
 		return usecases.NewHSMServiceWithAT(atClient), atCleanup, nil
+	}
+
+	var multErr *domain.ErrMultipleDevicesDetected
+	if errors.As(atErr, &multErr) {
+		return nil, nil, multErr
 	}
 
 	// Fallback to legacy binary serial transport if AT fails

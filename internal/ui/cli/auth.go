@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
+	"strings"
 
 	"github.com/gpfister/nrf52840-hsm-cli/internal/usecases"
 	"github.com/spf13/cobra"
@@ -73,10 +75,27 @@ func newLockCmd() *cobra.Command {
 }
 
 func newResetCmd() *cobra.Command {
-	return &cobra.Command{
+	var yesFlag bool
+
+	cmd := &cobra.Command{
 		Use:   "reset",
-		Short: "Reset active session state (AT+RESET)",
+		Short: "Factory reset device, zeroizing all persistent keys and Shamir secrets (AT+RESET)",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if !yesFlag {
+				fmt.Fprintln(cmd.OutOrStdout(), "WARNING: This operation will perform a destructive factory reset on the HSM.")
+				fmt.Fprintln(cmd.OutOrStdout(), "All persistent private keys, cryptographic material, and Shamir secrets will be permanently destroyed.")
+				fmt.Fprintln(cmd.OutOrStdout(), "The device will transition to an unconfigured state (pulsating blue LED).")
+				fmt.Fprint(cmd.OutOrStdout(), "\nAre you sure you want to proceed? (yes/no): ")
+
+				reader := bufio.NewReader(cmd.InOrStdin())
+				line, _ := reader.ReadString('\n')
+				ans := strings.ToLower(strings.TrimSpace(line))
+				if ans != "y" && ans != "yes" {
+					fmt.Fprintln(cmd.OutOrStdout(), "Reset cancelled.")
+					return nil
+				}
+			}
+
 			client, cleanup, err := getATClient()
 			if err != nil {
 				return err
@@ -87,8 +106,13 @@ func newResetCmd() *cobra.Command {
 				return fmt.Errorf("reset failed: %w", err)
 			}
 
-			fmt.Println("✓ [OK] HSM Session Reset! Volatile context cleared.")
+			fmt.Fprintln(cmd.OutOrStdout(), "✓ [OK] HSM Factory Reset Complete!")
+			fmt.Fprintln(cmd.OutOrStdout(), "All persistent keys and Shamir secrets have been wiped.")
+			fmt.Fprintln(cmd.OutOrStdout(), "The device is now in an unconfigured state. Run 'hsmutil init --threshold' to reconfigure.")
 			return nil
 		},
 	}
+
+	cmd.Flags().BoolVarP(&yesFlag, "yes", "y", false, "Confirm destructive factory reset without interactive prompt")
+	return cmd
 }

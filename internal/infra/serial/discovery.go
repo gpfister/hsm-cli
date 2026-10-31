@@ -200,8 +200,10 @@ func fallbackEnumerateDongles() ([]domain.DiscoveredDongle, error) {
 	return results, nil
 }
 
-// EnumerateDongles lists all detected nRF52840 HSM dongles attached to the system.
-func EnumerateDongles() ([]domain.DiscoveredDongle, error) {
+var enumerateDonglesFn = defaultEnumerateDongles
+
+// defaultEnumerateDongles inspects USB enumerators and fallback port scans for nRF52840 dongles.
+func defaultEnumerateDongles() ([]domain.DiscoveredDongle, error) {
 	detailed, err := getDetailedDongles()
 	if err == nil && len(detailed) > 0 {
 		return detailed, nil
@@ -224,6 +226,11 @@ func EnumerateDongles() ([]domain.DiscoveredDongle, error) {
 	return dongles, nil
 }
 
+// EnumerateDongles lists all detected nRF52840 HSM dongles attached to the system.
+func EnumerateDongles() ([]domain.DiscoveredDongle, error) {
+	return enumerateDonglesFn()
+}
+
 // FindDonglePortsTargeting scans for available dongle serial ports, optionally filtered by serial/BLE address.
 func FindDonglePortsTargeting(targetSerial string) ([]string, error) {
 	if targetSerial == "" {
@@ -244,8 +251,10 @@ func FindDonglePortsTargeting(targetSerial string) ([]string, error) {
 	if targetSerial != "" {
 		norm := NormalizeSerial(targetSerial)
 		for _, d := range dongles {
-			if NormalizeSerial(d.Serial) == norm ||
-				strings.HasSuffix(NormalizeSerial(d.Serial), norm) ||
+			dNorm := NormalizeSerial(d.Serial)
+			if dNorm == norm ||
+				strings.HasPrefix(dNorm, norm) ||
+				strings.HasSuffix(dNorm, norm) ||
 				strings.Contains(strings.ToUpper(d.DataPort), norm) {
 				matchingDongles = append(matchingDongles, d)
 			}
@@ -299,6 +308,8 @@ func FindDonglePortsTargeting(targetSerial string) ([]string, error) {
 }
 
 // AutoDiscoverPortTargeting locates and selects the HSM AT command serial port for a specific serial / BLE target.
+// When targetSerial is empty, it returns the single detected dongle port, or ErrMultipleDevicesDetected if
+// more than one dongle is present.
 func AutoDiscoverPortTargeting(targetSerial string) (string, error) {
 	if targetSerial == "" {
 		targetSerial = os.Getenv("NRF52840_HSM_SERIAL")
@@ -308,24 +319,62 @@ func AutoDiscoverPortTargeting(targetSerial string) (string, error) {
 		return envPort, nil
 	}
 
-	ports, err := FindDonglePortsTargeting(targetSerial)
+	dongles, err := EnumerateDongles()
 	if err != nil {
 		return "", fmt.Errorf("failed to scan serial ports: %w", err)
 	}
 
-	if len(ports) == 0 {
-		if targetSerial != "" {
-			return "", fmt.Errorf("no nRF52840 HSM Dongle found matching serial/BLE address %q", targetSerial)
+	if targetSerial == "" {
+		if len(dongles) == 0 {
+			return "", domain.ErrDeviceNotFound
 		}
-		return "", domain.ErrDeviceNotFound
+		if len(dongles) == 1 {
+			return dongles[0].DataPort, nil
+		}
+		return "", &domain.ErrMultipleDevicesDetected{Devices: dongles}
 	}
 
-	// Prioritize any port with suffix 3 (dedicated AT data channel)
-	for _, p := range ports {
-		if strings.HasSuffix(p, "3") {
-			return p, nil
+	// Filter dongles by matching normalized serial, BLE address, or prefix
+	norm := NormalizeSerial(targetSerial)
+	var matches []domain.DiscoveredDongle
+	for _, d := range dongles {
+		dNorm := NormalizeSerial(d.Serial)
+		if dNorm == norm ||
+			strings.HasPrefix(dNorm, norm) ||
+			strings.HasSuffix(dNorm, norm) ||
+			strings.Contains(strings.ToUpper(d.DataPort), norm) {
+			matches = append(matches, d)
 		}
 	}
 
-	return ports[0], nil
+	if len(matches) == 0 {
+		return "", fmt.Errorf("no nRF52840 HSM Dongle found matching %q: %w", targetSerial, domain.ErrDeviceNotFound)
+	}
+	if len(matches) > 1 {
+		return "", &domain.ErrMultipleDevicesDetected{Devices: matches}
+	}
+
+	return matches[0].DataPort, nil
+}
+
+// ResolvePortOrSerial resolves an input target which may be a direct port path (/dev/..., COM..., or file path)
+// or a serial/BLE address, returning the AT data port path.
+func ResolvePortOrSerial(target string) (string, error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return AutoDiscoverPortTargeting("")
+	}
+
+	// If target points to an existing file/dev path or starts with /dev/ or COM, return directly
+	if strings.HasPrefix(target, "/dev/") ||
+		strings.HasPrefix(strings.ToUpper(target), "COM") ||
+		strings.Contains(target, string(os.PathSeparator)) {
+		return target, nil
+	}
+
+	if _, err := os.Stat(target); err == nil {
+		return target, nil
+	}
+
+	return AutoDiscoverPortTargeting(target)
 }
