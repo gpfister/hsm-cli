@@ -29,7 +29,7 @@ Supports direct AT-style ASCII protocol communication over dedicated CDC-ACM ser
 
 ### Firmware & Integration Testing
 - `hsmutil firmware info`: Query active firmware version and MCUboot partition slot.
-- `hsmutil firmware update --file <bin>`: Stream chunked signed firmware images into candidate flash slot.
+- `hsmutil firmware update --file <bin>`: Stream chunked signed firmware images into candidate flash slot (Note: DFU streaming via `AT+DFU_CHUNK` / `AT+DFU_APPLY` will be finalized in firmware follow-up).
 - `hsmutil test`: Automated HSM integration self-test suite.
 - `hsmutil tui`: Interactive terminal dashboard powered by BubbleTea.
 
