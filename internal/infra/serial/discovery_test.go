@@ -93,6 +93,9 @@ func TestExtractBLEAddressFromPort(t *testing.T) {
 		{"/dev/cu.usbmodemF4CE368F12AB1", "F4CE368F12AB"},
 		{"/dev/tty.usbmodemFD54E793A75540C93", "FD54E793A75540C9"},
 		{"/dev/tty.usbmodemFD54E793A75540C91", "FD54E793A75540C9"},
+		{"/dev/tty.hsmF4CE368F12AB0", "F4CE368F12AB"},
+		{"/dev/tty.hsmF4CE368F12AB1", "F4CE368F12AB"},
+		{"/dev/tty.hsmFD54E793A75540C90", "FD54E793A75540C9"},
 		{"/dev/tty.usbmodem31424103", ""}, // Location ID, not 12/16 hex chars
 		{"/dev/ttyUSB0", ""},
 		{"COM3", ""},

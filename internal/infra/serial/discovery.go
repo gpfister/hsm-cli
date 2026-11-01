@@ -40,7 +40,7 @@ func ExtractBLEAddressFromPort(portPath string) string {
 
 	// Remove common serial prefix keywords
 	var rem string
-	for _, prefix := range []string{"tty.usbmodem", "cu.usbmodem", "usbmodem", "ttyacm"} {
+	for _, prefix := range []string{"tty.hsm", "cu.hsm", "hsm", "tty.usbmodem", "cu.usbmodem", "usbmodem", "ttyacm"} {
 		if strings.HasPrefix(lower, prefix) {
 			rem = base[len(prefix):]
 			break
@@ -96,8 +96,16 @@ func PortPriority(name string) int {
 		score -= 50
 	}
 
+	// Linux custom kernel driver /dev/tty.hsm* affinity
+	if strings.Contains(lower, "tty.hsm") {
+		score += 50
+		if strings.HasSuffix(lower, "1") {
+			score += 25
+		}
+	}
+
 	// General USB CDC-ACM affinity
-	if strings.Contains(lower, "usbmodem") || strings.Contains(lower, "ttyacm") {
+	if strings.Contains(lower, "usbmodem") || strings.Contains(lower, "ttyacm") || strings.Contains(lower, "hsm") {
 		score += 20
 	}
 
@@ -202,8 +210,57 @@ func fallbackEnumerateDongles() ([]domain.DiscoveredDongle, error) {
 
 var enumerateDonglesFn = defaultEnumerateDongles
 
+// scanHSMDevNodes checks for custom /dev/tty.hsm* nodes registered by nrf52840-hsm-kmod
+func scanHSMDevNodes() ([]domain.DiscoveredDongle, error) {
+	matches, err := filepath.Glob("/dev/tty.hsm*")
+	if err != nil || len(matches) == 0 {
+		return nil, nil
+	}
+
+	groups := make(map[string][]string)
+	var bleOrder []string
+	for _, m := range matches {
+		ble := ExtractBLEAddressFromPort(m)
+		if ble == "" {
+			ble = "DEFAULT"
+		}
+		if _, exists := groups[ble]; !exists {
+			bleOrder = append(bleOrder, ble)
+		}
+		groups[ble] = append(groups[ble], m)
+	}
+
+	var results []domain.DiscoveredDongle
+	for _, ble := range bleOrder {
+		ports := groups[ble]
+		SortPortsByPriority(ports)
+		var dataPort, consolePort string
+		if len(ports) == 1 {
+			dataPort = ports[0]
+		} else if len(ports) >= 2 {
+			dataPort = ports[0]
+			consolePort = ports[1]
+		}
+		results = append(results, domain.DiscoveredDongle{
+			Serial:       NormalizeSerial(ble),
+			DataPort:     dataPort,
+			ConsolePort:  consolePort,
+			VID:          "1209",
+			PID:          "0001",
+			Product:      "nRF52840 HSM Dongle",
+			Manufacturer: "pid.codes",
+		})
+	}
+
+	return results, nil
+}
+
 // defaultEnumerateDongles inspects USB enumerators and fallback port scans for nRF52840 dongles.
 func defaultEnumerateDongles() ([]domain.DiscoveredDongle, error) {
+	if hsmDongles, err := scanHSMDevNodes(); err == nil && len(hsmDongles) > 0 {
+		return hsmDongles, nil
+	}
+
 	detailed, err := getDetailedDongles()
 	if err == nil && len(detailed) > 0 {
 		return detailed, nil
