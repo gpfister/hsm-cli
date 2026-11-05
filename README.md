@@ -1,19 +1,19 @@
-# nrf52840-hsm-cli (`hsmutil`)
+# HSM CLI Utility (hsmutil)
 
-Cross-platform command-line utility and interactive terminal dashboard (TUI) for the **nRF52840 Hardware Security Module (HSM)** dongle (`PCA10059`), built in Go using Cobra and BubbleTea following Clean Architecture.
+Cross-platform command-line utility and interactive terminal dashboard (TUI) allowing operators to interact with connected Hardware Security Module (HSM) USB keys, built in Go using Cobra and BubbleTea following Clean Architecture.
 
 Supports direct AT-style ASCII protocol communication over dedicated CDC-ACM serial endpoints (`VID 0x1209`, `PID 0x0001`), PKCS#11 Cryptoki provider diagnostics, key generation and management, and dual-stage secure boot updates.
 
 ## Features
 
 ### Device & Session Management
-- `hsmutil devices`: List connected nRF52840 HSM dongles with detected BLE addresses, AT data ports, console ports, and USB descriptors (Alias: `hsmutil list`, supports `--json`).
+- `hsmutil devices`: List connected HSM USB keys/tokens with detected serial numbers/BLE addresses, AT data ports, console ports, and USB descriptors (Alias: `hsmutil list`, supports `--json`).
 - `hsmutil info`: Query device build version, hardware model, unique device UID, active port, and bootloader stages (`AT+INFO?`).
 - `hsmutil status`: Inspect active authentication state, remaining PIN retries, and stored key count (`AT+STATUS?`).
 - `hsmutil auth --pin <pin>`: Authenticate User PIN, unlocking cryptographic operations (`AT+AUTH=<pin>`). (Alias: `unlock`).
 - `hsmutil lock`: Invalidate active session and return HSM to locked state (`AT+LOCK`).
 - `hsmutil reset [-y/--yes]`: Factory reset the HSM, irreversibly zeroizing all 32 CC310 keys, Shamir master secret, restoring defaults, and transitioning to unconfigured state (with interactive confirmation safeguard or `-y` bypass; `AT+RESET`).
-- `hsmutil echo [message]`: Ping HSM dongle and verify roundtrip serial communication latency (`AT`).
+- `hsmutil echo [message]`: Ping connected HSM USB key and verify roundtrip serial communication latency (`AT`).
 - `hsmutil random --len <n>`: Generate hardware random bytes from CryptoCell CC310 TRNG (`AT+RANDOM=<len>`).
 
 ### Hardware Key Management
@@ -34,18 +34,18 @@ Supports direct AT-style ASCII protocol communication over dedicated CDC-ACM ser
 - `hsmutil tui`: Interactive terminal dashboard powered by BubbleTea.
 
 ## Serial Port Auto-Discovery & Targeting
-The CLI automatically searches for nRF52840 HSM dongles matching Vendor ID `0x1209` and Product ID `0x0001` (pid.codes nRF52840 HSM Dongle) at 115200 8N1.
+The CLI automatically searches for connected HSM USB keys matching Vendor ID `0x1209` and Product ID `0x0001` (pid.codes nRF52840 HSM Dongle) at 115200 8N1.
 
 - **Dual CDC-ACM Port Prioritization**: Automatically prioritizes suffix `3` (`/dev/tty.usbmodem...3` / AT data interface) over suffix `1` (Zephyr console logger interface) on macOS and Linux CDC-ACM serial ports.
-- **BLE Address Matching**: Discovers and matches dongles formatted as `/dev/tty.usbmodem<BLE_ADDR>3`.
+- **Serial / BLE Address Matching**: Discovers and matches connected keys formatted as `/dev/tty.usbmodem<BLE_ADDR>3`.
 - **Targeting by Serial / BLE Address**:
   - **CLI Flag**: `hsmutil --serial F4CE368F12AB <command>` (shorthand `-s`)
   - **Environment Variable**: `export NRF52840_HSM_SERIAL=F4CE368F12AB`
 - **Port Path Override**:
   - **CLI Flag**: `hsmutil --port /dev/tty.usbmodem31424103 <command>` (shorthand `-p`)
   - **Environment Variable**: `export NRF52840_HSM_PORT=/tmp/mock-hsm-pty` (e.g. for virtual PTY testing)
-- **Multi-Dongle Disambiguation Safeguard**:
-  - If multiple dongles are plugged into the host without `--serial` or `--port`, `hsmutil` automatically halts with a descriptive error table displaying all attached devices and their BLE addresses/ports, preventing arbitrary command execution against the wrong HSM.
+- **Multi-Device Disambiguation Safeguard**:
+  - If multiple HSM keys are plugged into the host without `--serial` or `--port`, `hsmutil` automatically halts with a descriptive error table displaying all attached devices and their serial numbers/ports, preventing arbitrary command execution against the wrong HSM.
 - **Key Migration Device Resolution**:
   - `hsmutil key migrate --source <SERIAL_OR_PORT> --target <SERIAL_OR_PORT>` resolves either direct OS port paths or 12-digit hex BLE serial numbers via `ResolvePortOrSerial()`.
 
