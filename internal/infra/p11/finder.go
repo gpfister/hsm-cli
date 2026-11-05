@@ -69,6 +69,9 @@ func FindModule(explicitPath string) (string, error) {
 		filepath.Join("build", filename),
 		filepath.Join(".", "build", filename),
 		filepath.Join("..", "build", filename),
+		filepath.Join("..", "hsm-libpkcs11", "build", filename),
+		filepath.Join("..", "..", "hsm-libpkcs11", "build", filename),
+		filepath.Join("hsm-libpkcs11", "build", filename),
 		filepath.Join("..", "nrf52840-hsm-libpkcs11", "build", filename),
 		filepath.Join("..", "..", "nrf52840-hsm-libpkcs11", "build", filename),
 		filepath.Join("nrf52840-hsm-libpkcs11", "build", filename),
@@ -82,6 +85,8 @@ func FindModule(explicitPath string) (string, error) {
 			filepath.Join(execDir, filename),
 			filepath.Join(execDir, "build", filename),
 			filepath.Join(execDir, "..", "build", filename),
+			filepath.Join(execDir, "..", "hsm-libpkcs11", "build", filename),
+			filepath.Join(execDir, "..", "..", "hsm-libpkcs11", "build", filename),
 			filepath.Join(execDir, "..", "nrf52840-hsm-libpkcs11", "build", filename),
 			filepath.Join(execDir, "..", "..", "nrf52840-hsm-libpkcs11", "build", filename),
 		)
