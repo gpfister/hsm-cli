@@ -229,7 +229,133 @@ func (c *ATClient) Random(length int) ([]byte, error) {
 	return nil, errors.New("missing +RANDOM: response line")
 }
 
+// DFUInfo queries the active firmware version, slot, image size, and SHA-256 digest via AT+DFU_INFO?.
+// If the connected firmware does not support AT+DFU_INFO? (+CME ERROR: 8), it falls back to AT+INFO?.
+func (c *ATClient) DFUInfo() (*FirmwareInfo, error) {
+	lines, err := c.transport.SendCommand("AT+DFU_INFO?", 3*time.Second)
+	if err != nil {
+		if errors.Is(err, ErrCommandUnsupported) {
+			devInfo, infoErr := c.Info()
+			if infoErr != nil {
+				return nil, err
+			}
+			maj, min, pat := parseSemver(devInfo.Firmware)
+			return &FirmwareInfo{
+				Major:      maj,
+				Minor:      min,
+				Patch:      pat,
+				ActiveSlot: 0,
+				ImageSize:  0,
+			}, nil
+		}
+		return nil, err
+	}
+
+	var dfuLine string
+	for _, l := range lines {
+		if strings.HasPrefix(l, "+DFU_INFO:") {
+			dfuLine = l
+			break
+		}
+	}
+
+	if dfuLine == "" {
+		return nil, errors.New("missing +DFU_INFO: line in device response")
+	}
+
+	return parseDFUInfoLine(dfuLine)
+}
+
+// DFUChunk writes a firmware binary chunk (1..256 bytes) at offset to the secondary MCUboot slot via AT+DFU_CHUNK=<offset>,<hex>.
+func (c *ATClient) DFUChunk(offset uint32, data []byte) error {
+	if len(data) < 1 || len(data) > 256 {
+		return fmt.Errorf("DFU chunk length %d out of range (1..256)", len(data))
+	}
+
+	hexData := strings.ToUpper(hex.EncodeToString(data))
+	cmd := fmt.Sprintf("AT+DFU_CHUNK=%d,%s", offset, hexData)
+	_, err := c.transport.SendCommand(cmd, 10*time.Second)
+	return err
+}
+
+// DFUApply marks the secondary MCUboot slot for test upgrade and triggers a device reboot via AT+DFU_APPLY.
+func (c *ATClient) DFUApply() error {
+	_, err := c.transport.SendCommand("AT+DFU_APPLY", 10*time.Second)
+	return err
+}
+
 // Helper parsing routines
+
+func parseDFUInfoLine(line string) (*FirmwareInfo, error) {
+	content := strings.TrimSpace(strings.TrimPrefix(line, "+DFU_INFO:"))
+	info := &FirmwareInfo{
+		Major: 1,
+		Minor: 0,
+		Patch: 0,
+	}
+
+	params := splitQuotedCsv(content)
+	for _, p := range params {
+		parts := strings.SplitN(p, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.ToUpper(strings.TrimSpace(parts[0]))
+		val := strings.Trim(strings.TrimSpace(parts[1]), "\"")
+
+		switch key {
+		case "VER", "VERSION", "FW":
+			info.Major, info.Minor, info.Patch = parseSemver(val)
+		case "SLOT":
+			slot, err := strconv.ParseUint(val, 10, 32)
+			if err != nil {
+				return nil, fmt.Errorf("invalid SLOT in +DFU_INFO: %w", err)
+			}
+			info.ActiveSlot = uint32(slot)
+		case "SIZE":
+			size, err := strconv.ParseUint(val, 10, 32)
+			if err != nil {
+				return nil, fmt.Errorf("invalid SIZE in +DFU_INFO: %w", err)
+			}
+			info.ImageSize = uint32(size)
+		case "SHA256":
+			if val != "" {
+				shaBytes, err := hex.DecodeString(val)
+				if err != nil {
+					return nil, fmt.Errorf("invalid SHA256 hex in +DFU_INFO: %w", err)
+				}
+				info.ImageSHA256 = shaBytes
+			}
+		}
+	}
+
+	return info, nil
+}
+
+func parseSemver(verStr string) (uint8, uint8, uint8) {
+	clean := strings.TrimPrefix(strings.TrimSpace(verStr), "v")
+	if idx := strings.IndexByte(clean, '-'); idx != -1 {
+		clean = clean[:idx]
+	}
+	parts := strings.Split(clean, ".")
+	var maj, min, pat uint8
+	if len(parts) >= 1 {
+		if v, err := strconv.ParseUint(parts[0], 10, 8); err == nil {
+			maj = uint8(v)
+		}
+	}
+	if len(parts) >= 2 {
+		if v, err := strconv.ParseUint(parts[1], 10, 8); err == nil {
+			min = uint8(v)
+		}
+	}
+	if len(parts) >= 3 {
+		if v, err := strconv.ParseUint(parts[2], 10, 8); err == nil {
+			pat = uint8(v)
+		}
+	}
+	return maj, min, pat
+}
 
 func parseInfoLine(line string) (*DeviceInfo, error) {
 	content := strings.TrimSpace(strings.TrimPrefix(line, "+INFO:"))

@@ -382,3 +382,102 @@ func TestATClient_MigrateWrapAndUnwrap(t *testing.T) {
 		t.Fatalf("MigrateUnwrap failed: %v", err)
 	}
 }
+
+func TestATClient_DFUInfo(t *testing.T) {
+	mt := newMockTransport()
+	shaHex := strings.Repeat("AA", 32)
+	mt.responses["AT+DFU_INFO?"] = []string{
+		`+DFU_INFO: VER="1.2.3",SLOT=0,SIZE=262144,SHA256="` + shaHex + `"`,
+	}
+
+	client := NewATClient(mt)
+	info, err := client.DFUInfo()
+	if err != nil {
+		t.Fatalf("DFUInfo failed: %v", err)
+	}
+
+	if info.Major != 1 || info.Minor != 2 || info.Patch != 3 {
+		t.Errorf("expected version 1.2.3, got %d.%d.%d", info.Major, info.Minor, info.Patch)
+	}
+	if info.ActiveSlot != 0 {
+		t.Errorf("expected ActiveSlot=0, got %d", info.ActiveSlot)
+	}
+	if info.ImageSize != 262144 {
+		t.Errorf("expected ImageSize=262144, got %d", info.ImageSize)
+	}
+	if len(info.ImageSHA256) != 32 || info.ImageSHA256[0] != 0xAA {
+		t.Errorf("unexpected ImageSHA256: %x", info.ImageSHA256)
+	}
+}
+
+func TestATClient_DFUInfo_FallbackOnUnsupported(t *testing.T) {
+	mt := newMockTransport()
+	mt.errors["AT+DFU_INFO?"] = ErrCommandUnsupported
+	mt.responses["AT+INFO?"] = []string{
+		`+INFO: FW="2.1.4-mock",HW="PCA10059",UID="0102030405060708",BOOT="B0+MCUboot"`,
+	}
+
+	client := NewATClient(mt)
+	info, err := client.DFUInfo()
+	if err != nil {
+		t.Fatalf("DFUInfo fallback failed: %v", err)
+	}
+
+	if info.Major != 2 || info.Minor != 1 || info.Patch != 4 {
+		t.Errorf("expected fallback version 2.1.4, got %d.%d.%d", info.Major, info.Minor, info.Patch)
+	}
+	if info.ActiveSlot != 0 || info.ImageSize != 0 {
+		t.Errorf("expected slot 0 and size 0 on fallback, got slot=%d size=%d", info.ActiveSlot, info.ImageSize)
+	}
+}
+
+func TestATClient_DFUChunk(t *testing.T) {
+	mt := newMockTransport()
+	chunk := []byte{0xde, 0xad, 0xbe, 0xef}
+	mt.responses["AT+DFU_CHUNK=0,DEADBEEF"] = []string{}
+
+	client := NewATClient(mt)
+	if err := client.DFUChunk(0, chunk); err != nil {
+		t.Fatalf("DFUChunk failed: %v", err)
+	}
+
+	if mt.lastCommand != "AT+DFU_CHUNK=0,DEADBEEF" {
+		t.Errorf("expected command 'AT+DFU_CHUNK=0,DEADBEEF', got %q", mt.lastCommand)
+	}
+
+	// Empty chunk rejection
+	if err := client.DFUChunk(0, nil); err == nil {
+		t.Errorf("expected error for empty chunk, got nil")
+	}
+
+	// Oversized (>256B) chunk rejection
+	oversized := make([]byte, 257)
+	if err := client.DFUChunk(0, oversized); err == nil {
+		t.Errorf("expected error for 257-byte chunk, got nil")
+	}
+
+	// Device locked error propagation
+	mt.errors["AT+DFU_CHUNK=256,DEADBEEF"] = ErrDeviceLocked
+	if err := client.DFUChunk(256, chunk); !errors.Is(err, ErrDeviceLocked) {
+		t.Errorf("expected ErrDeviceLocked, got %v", err)
+	}
+}
+
+func TestATClient_DFUApply(t *testing.T) {
+	mt := newMockTransport()
+	mt.responses["AT+DFU_APPLY"] = []string{}
+
+	client := NewATClient(mt)
+	if err := client.DFUApply(); err != nil {
+		t.Fatalf("DFUApply failed: %v", err)
+	}
+	if mt.lastCommand != "AT+DFU_APPLY" {
+		t.Errorf("expected command 'AT+DFU_APPLY', got %q", mt.lastCommand)
+	}
+
+	// Error propagation
+	mt.errors["AT+DFU_APPLY"] = ErrDeviceLocked
+	if err := client.DFUApply(); !errors.Is(err, ErrDeviceLocked) {
+		t.Errorf("expected ErrDeviceLocked, got %v", err)
+	}
+}

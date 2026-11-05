@@ -91,6 +91,10 @@ func (s *HSMService) GetDeviceInfo() (*domain.DeviceInfo, error) {
 }
 
 func (s *HSMService) GetFirmwareInfo() (*domain.FirmwareInfo, error) {
+	if s.atClient != nil {
+		return s.atClient.DFUInfo()
+	}
+
 	if s.transport == nil {
 		// Mock/AT fallback
 		return &domain.FirmwareInfo{
@@ -176,10 +180,6 @@ func (s *HSMService) Reset() error {
 }
 
 func (s *HSMService) UpdateFirmware(filePath string, onProgress func(sent, total int, pct float64)) error {
-	if s.transport == nil {
-		return fmt.Errorf("DFU update requires legacy binary serial connection")
-	}
-
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to read firmware file: %w", err)
@@ -192,6 +192,34 @@ func (s *HSMService) UpdateFirmware(filePath string, onProgress func(sent, total
 
 	chunkSize := 256
 	offset := 0
+
+	if s.atClient != nil {
+		for offset < total {
+			end := offset + chunkSize
+			if end > total {
+				end = total
+			}
+
+			chunk := data[offset:end]
+			if err := s.atClient.DFUChunk(uint32(offset), chunk); err != nil {
+				return fmt.Errorf("chunk write failed at offset %d: %w", offset, err)
+			}
+
+			offset = end
+			if onProgress != nil {
+				onProgress(offset, total, float64(offset)/float64(total)*100.0)
+			}
+		}
+
+		if err := s.atClient.DFUApply(); err != nil {
+			return fmt.Errorf("failed to apply firmware update: %w", err)
+		}
+		return nil
+	}
+
+	if s.transport == nil {
+		return fmt.Errorf("no active HSM transport connection")
+	}
 
 	for offset < total {
 		end := offset + chunkSize
