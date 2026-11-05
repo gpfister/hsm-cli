@@ -2,20 +2,95 @@ package cli
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/gpfister/nrf52840-hsm-cli/internal/usecases"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
 
-func newAuthCmd() *cobra.Command {
+type pinModel struct {
+	textInput textinput.Model
+	err       error
+	value     string
+	aborted   bool
+}
+
+func initialPinModel() pinModel {
+	ti := textinput.New()
+	ti.Placeholder = "Enter HSM PIN"
+	ti.EchoMode = textinput.EchoPassword
+	ti.EchoCharacter = '•'
+	ti.Focus()
+	ti.CharLimit = 64
+	ti.Width = 30
+
+	return pinModel{
+		textInput: ti,
+	}
+}
+
+func (m pinModel) Init() tea.Cmd {
+	return textinput.Blink
+}
+
+func (m pinModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyEnter:
+			m.value = m.textInput.Value()
+			return m, tea.Quit
+		case tea.KeyCtrlC, tea.KeyEsc:
+			m.aborted = true
+			return m, tea.Quit
+		}
+	case error:
+		m.err = msg
+		return m, nil
+	}
+
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
+func (m pinModel) View() string {
+	return fmt.Sprintf(
+		"Enter HSM PIN:\n\n%s\n\n(press Enter to submit, Esc to cancel)\n",
+		m.textInput.View(),
+	)
+}
+
+func promptPINBubbleTea() (string, error) {
+	p := tea.NewProgram(initialPinModel())
+	m, err := p.Run()
+	if err != nil {
+		return "", fmt.Errorf("interactive PIN prompt failed: %w", err)
+	}
+	finalModel, ok := m.(pinModel)
+	if !ok || finalModel.aborted {
+		return "", errors.New("PIN entry cancelled")
+	}
+	if finalModel.err != nil {
+		return "", finalModel.err
+	}
+	return finalModel.value, nil
+}
+
+func newUnlockCmd() *cobra.Command {
 	var pin string
 	var thresholdMode bool
 
 	cmd := &cobra.Command{
-		Use:     "auth",
-		Aliases: []string{"unlock"},
+		Use:     "unlock",
+		Aliases: []string{"auth"},
 		Short:   "Authenticate User PIN or execute threshold ceremony to unlock the HSM",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, cleanup, err := getATClient()
@@ -36,7 +111,24 @@ func newAuthCmd() *cobra.Command {
 				pin = args[0]
 			}
 			if pin == "" {
-				return fmt.Errorf("PIN is required: supply via --pin, positional argument, or use --threshold")
+				// Interactive TTY detection
+				if isatty.IsTerminal(os.Stdin.Fd()) || isatty.IsCygwinTerminal(os.Stdin.Fd()) {
+					p, err := promptPINBubbleTea()
+					if err != nil {
+						return err
+					}
+					pin = p
+				} else {
+					// Non-interactive / headless fallback: read single line from stdin
+					reader := bufio.NewReader(cmd.InOrStdin())
+					line, err := reader.ReadString('\n')
+					if err == nil || len(line) > 0 {
+						pin = strings.TrimSpace(line)
+					}
+				}
+			}
+			if pin == "" {
+				return fmt.Errorf("PIN is required: supply via --pin, pipe to stdin, or use --threshold")
 			}
 
 			if err := client.Auth(pin); err != nil {
@@ -51,6 +143,11 @@ func newAuthCmd() *cobra.Command {
 	cmd.Flags().StringVar(&pin, "pin", "", "User PIN (4..16 characters)")
 	cmd.Flags().BoolVarP(&thresholdMode, "threshold", "t", false, "Execute turn-by-turn custodian threshold unlock ceremony")
 	return cmd
+}
+
+// newAuthCmd returns an unlock command for backward compatibility.
+func newAuthCmd() *cobra.Command {
+	return newUnlockCmd()
 }
 
 func newLockCmd() *cobra.Command {
@@ -108,7 +205,7 @@ func newResetCmd() *cobra.Command {
 
 			fmt.Fprintln(cmd.OutOrStdout(), "✓ [OK] HSM Factory Reset Complete!")
 			fmt.Fprintln(cmd.OutOrStdout(), "All persistent keys and Shamir secrets have been wiped.")
-			fmt.Fprintln(cmd.OutOrStdout(), "The device is now in an unconfigured state. Run 'hsmutil init --threshold' to reconfigure.")
+			fmt.Fprintln(cmd.OutOrStdout(), "The device is now in an unconfigured state. Run 'hsmutil device init --threshold' to reconfigure.")
 			return nil
 		},
 	}

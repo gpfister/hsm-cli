@@ -160,7 +160,7 @@ func newP11InitTokenCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&modulePath, "module", "m", "", "Path to PKCS#11 provider shared library (.dylib/.so/.dll)")
 	cmd.Flags().Uint64VarP(&slotID, "slot", "s", 1, "Slot ID to initialize")
 	cmd.Flags().StringVar(&pin, "pin", "123456", "Token SO or User PIN")
-	cmd.Flags().StringVarP(&label, "label", "l", "nRF52840-HSM", "Token label (up to 32 characters)")
+	cmd.Flags().StringVarP(&label, "label", "l", "HSM-Token", "Token label (up to 32 characters)")
 
 	return cmd
 }
@@ -236,7 +236,7 @@ func newP11SignCmd() *cobra.Command {
 
 			if len(digest) == 0 {
 				if cleanData == "" {
-					cleanData = "nrf52840-hsm-pkcs11-signature-payload"
+					cleanData = "hsm-pkcs11-signature-payload"
 				}
 				h := sha256.Sum256([]byte(cleanData))
 				digest = h[:]

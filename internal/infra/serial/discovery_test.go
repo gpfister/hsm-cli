@@ -215,7 +215,7 @@ func TestAutoDiscover_MultipleDevices(t *testing.T) {
 	}
 
 	errMsg := multErr.Error()
-	if !strings.Contains(errMsg, "multiple nRF52840 HSM Dongles detected") {
+	if !strings.Contains(errMsg, "multiple HSM USB devices detected") {
 		t.Errorf("error message missing header: %s", errMsg)
 	}
 	if !strings.Contains(errMsg, "F4CE368F12AB") || !strings.Contains(errMsg, "FD54E793A75540C9") {

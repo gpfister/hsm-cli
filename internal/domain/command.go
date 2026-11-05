@@ -26,5 +26,5 @@ var (
 	ErrInvalidPacket  = errors.New("invalid packet format or length")
 	ErrDeviceError    = errors.New("device returned error status")
 	ErrDeviceTimeout  = errors.New("timeout waiting for device response")
-	ErrDeviceNotFound = errors.New("no compatible nRF52840 HSM Dongle detected")
+	ErrDeviceNotFound = errors.New("no compatible HSM USB device detected")
 )

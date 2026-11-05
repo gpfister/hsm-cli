@@ -272,7 +272,7 @@ func defaultEnumerateDongles() ([]domain.DiscoveredDongle, error) {
 	}
 
 	var dongles []domain.DiscoveredDongle
-	if envPort := os.Getenv("NRF52840_HSM_PORT"); envPort != "" {
+	if envPort := getEnvPort(); envPort != "" {
 		dongles = append(dongles, domain.DiscoveredDongle{
 			Serial:   "MOCK-HSM",
 			DataPort: envPort,
@@ -283,7 +283,21 @@ func defaultEnumerateDongles() ([]domain.DiscoveredDongle, error) {
 	return dongles, nil
 }
 
-// EnumerateDongles lists all detected nRF52840 HSM dongles attached to the system.
+func getEnvPort() string {
+	if v := os.Getenv("HSM_PORT"); v != "" {
+		return v
+	}
+	return os.Getenv("NRF52840_HSM_PORT")
+}
+
+func getEnvSerial() string {
+	if v := os.Getenv("HSM_SERIAL"); v != "" {
+		return v
+	}
+	return os.Getenv("NRF52840_HSM_SERIAL")
+}
+
+// EnumerateDongles lists all detected HSM USB keys/dongles attached to the system.
 func EnumerateDongles() ([]domain.DiscoveredDongle, error) {
 	return enumerateDonglesFn()
 }
@@ -291,11 +305,11 @@ func EnumerateDongles() ([]domain.DiscoveredDongle, error) {
 // FindDonglePortsTargeting scans for available dongle serial ports, optionally filtered by serial/BLE address.
 func FindDonglePortsTargeting(targetSerial string) ([]string, error) {
 	if targetSerial == "" {
-		targetSerial = os.Getenv("NRF52840_HSM_SERIAL")
+		targetSerial = getEnvSerial()
 	}
 
 	// Environment variable port override takes precedence if no serial target is specified
-	if envPort := os.Getenv("NRF52840_HSM_PORT"); envPort != "" && targetSerial == "" {
+	if envPort := getEnvPort(); envPort != "" && targetSerial == "" {
 		return []string{envPort}, nil
 	}
 
@@ -369,10 +383,10 @@ func FindDonglePortsTargeting(targetSerial string) ([]string, error) {
 // more than one dongle is present.
 func AutoDiscoverPortTargeting(targetSerial string) (string, error) {
 	if targetSerial == "" {
-		targetSerial = os.Getenv("NRF52840_HSM_SERIAL")
+		targetSerial = getEnvSerial()
 	}
 
-	if envPort := os.Getenv("NRF52840_HSM_PORT"); envPort != "" && targetSerial == "" {
+	if envPort := getEnvPort(); envPort != "" && targetSerial == "" {
 		return envPort, nil
 	}
 

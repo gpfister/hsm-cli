@@ -15,23 +15,24 @@ help:
 	@echo "                   hsmutil CLI Build Automation                   "
 	@echo "=================================================================="
 	@echo "Targets:"
-	@echo "  make build          Build '$(BINARY_NAME)' for current host"
+	@echo "  make build          Build '$(BINARY_NAME)' (static binary, CGO_ENABLED=0)"
 	@echo "  make build-all      Cross-compile for darwin/linux/windows (arm64 & amd64)"
 	@echo "  make test           Run unit tests"
-	@echo "  make clean          Remove compiled binaries"
+	@echo "  make clean          Remove compiled binaries and symlinks"
 	@echo "=================================================================="
 
 all: test build
 
 build:
 	@mkdir -p $(BIN_DIR)
-	@echo "[INFO] Building $(BINARY_NAME) for host..."
-	go build -ldflags="-s -w" -o $(BIN_DIR)/$(BINARY_NAME) $(SRC_PKG)
-	@echo "[SUCCESS] Host binary generated: $(BIN_DIR)/$(BINARY_NAME)"
+	@echo "[INFO] Building $(BINARY_NAME) (pure static binary, CGO_ENABLED=0)..."
+	CGO_ENABLED=0 go build -ldflags="-s -w" -o $(BIN_DIR)/$(BINARY_NAME) $(SRC_PKG)
+	@ln -sf $(BINARY_NAME) $(BIN_DIR)/$(BINARY_NAME)s
+	@echo "[SUCCESS] Host binary generated: $(BIN_DIR)/$(BINARY_NAME) (symlink: $(BIN_DIR)/$(BINARY_NAME)s)"
 
 build-all:
 	@mkdir -p $(BIN_DIR)
-	@echo "[INFO] Cross-compiling $(BINARY_NAME) across 5 target architectures..."
+	@echo "[INFO] Cross-compiling $(BINARY_NAME) across 5 target architectures (CGO_ENABLED=0)..."
 	
 	@echo "  -> darwin/arm64..."
 	@GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o $(BIN_DIR)/$(BINARY_NAME)-darwin-arm64 $(SRC_PKG)

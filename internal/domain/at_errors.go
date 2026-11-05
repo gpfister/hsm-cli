@@ -13,12 +13,12 @@ type ErrMultipleDevicesDetected struct {
 
 func (e *ErrMultipleDevicesDetected) Error() string {
 	var sb strings.Builder
-	sb.WriteString("multiple nRF52840 HSM Dongles detected:\n")
+	sb.WriteString("multiple HSM USB devices detected:\n")
 	for i, d := range e.Devices {
 		sb.WriteString(fmt.Sprintf("  [%d] Serial/BLE: %-16s Product: %-22s Port: %s\n",
 			i+1, d.Serial, d.Product, d.DataPort))
 	}
-	sb.WriteString("\nPlease specify target device using --port (-p) or --serial (-s), or set NRF52840_HSM_SERIAL.")
+	sb.WriteString("\nPlease specify target device using --port (-p) or --serial (-s), or set HSM_SERIAL / NRF52840_HSM_SERIAL.")
 	return sb.String()
 }
 

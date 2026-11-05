@@ -67,7 +67,7 @@ func newKeyGenerateCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "generate",
-		Short: "Generate secp256r1 keypair using CC310 TRNG (AT+KEYGEN)",
+		Short: "Generate secp256r1 keypair using hardware TRNG (AT+KEYGEN)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if slot < 1 || slot > 16 {
 				return fmt.Errorf("--slot must be between 1 and 16 (got %d)", slot)
@@ -144,7 +144,7 @@ func newKeySignCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "sign",
-		Short: "Sign a 32-byte SHA-256 digest with specified key using CC310 (AT+SIGN)",
+		Short: "Sign a 32-byte SHA-256 digest with specified key using hardware accelerator (AT+SIGN)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if slot < 1 || slot > 16 {
 				return fmt.Errorf("--slot must be between 1 and 16 (got %d)", slot)

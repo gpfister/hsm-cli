@@ -16,36 +16,51 @@ var (
 	serialFlag string
 	rootCmd    = &cobra.Command{
 		Use:   "hsmutil",
-		Short: "hsmutil — CLI & TUI tool for nRF52840 Hardware Security Module Dongle",
+		Short: "hsmutil — Command-line interface for the Hardware Security Module (HSM) USB Key",
 		Long: `hsmutil is the command-line interface for managing and testing
-the nRF52840-based Hardware Security Module (HSM) USB dongle, supporting
-AT-style ASCII serial protocol, PKCS#11 diagnostics, and dual-stage secure boot.`,
+the Hardware Security Module (HSM) USB key, supporting device lifecycle operations
+(init, reset, lock, firmware), AT-style ASCII serial protocol, PKCS#11 diagnostics,
+and dual-stage secure boot.`,
 	}
 )
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&portFlag, "port", "p", "", "Serial port of HSM data interface (auto-detected if omitted or from NRF52840_HSM_PORT)")
-	rootCmd.PersistentFlags().StringVarP(&serialFlag, "serial", "s", "", "Target specific HSM dongle by 12-digit hex BLE address or serial number (or from NRF52840_HSM_SERIAL)")
+	rootCmd.PersistentFlags().StringVarP(&portFlag, "port", "p", "", "Serial port of HSM data interface (auto-detected if omitted or from HSM_PORT)")
+	rootCmd.PersistentFlags().StringVarP(&serialFlag, "serial", "s", "", "Target specific HSM key by 12-digit hex BLE address or serial number (or from HSM_SERIAL)")
 
-	// AT protocol device commands
+	// Primary command hierarchy
+	rootCmd.AddCommand(newDeviceCmd())
 	rootCmd.AddCommand(newDevicesCmd())
-	rootCmd.AddCommand(newInfoCmd())
-	rootCmd.AddCommand(newStatusCmd())
-	rootCmd.AddCommand(newAuthCmd())
-	rootCmd.AddCommand(newInitCmd())
-	rootCmd.AddCommand(newLockCmd())
-	rootCmd.AddCommand(newResetCmd())
+	rootCmd.AddCommand(newUnlockCmd())
 	rootCmd.AddCommand(newKeyCmd())
-	rootCmd.AddCommand(newRandomCmd())
 	rootCmd.AddCommand(newEchoCmd())
-
-	// PKCS#11 diagnostics
+	rootCmd.AddCommand(newRandomCmd())
 	rootCmd.AddCommand(newP11Cmd())
 
-	// Firmware DFU, integration test, and interactive TUI
-	rootCmd.AddCommand(newFirmwareCmd())
-	rootCmd.AddCommand(newTestCmd())
-	rootCmd.AddCommand(newTUICmd())
+	// Backward-compatible hidden aliases on rootCmd for legacy workflows
+	legacyInfo := newDeviceInfoCmd()
+	legacyInfo.Hidden = true
+	rootCmd.AddCommand(legacyInfo)
+
+	legacyStatus := newDeviceStatusCmd()
+	legacyStatus.Hidden = true
+	rootCmd.AddCommand(legacyStatus)
+
+	legacyInit := newInitCmd()
+	legacyInit.Hidden = true
+	rootCmd.AddCommand(legacyInit)
+
+	legacyLock := newLockCmd()
+	legacyLock.Hidden = true
+	rootCmd.AddCommand(legacyLock)
+
+	legacyReset := newResetCmd()
+	legacyReset.Hidden = true
+	rootCmd.AddCommand(legacyReset)
+
+	legacyFirmware := newFirmwareCmd()
+	legacyFirmware.Hidden = true
+	rootCmd.AddCommand(legacyFirmware)
 }
 
 func Execute() {
@@ -60,7 +75,10 @@ func getATClient() (*domain.ATClient, func(), error) {
 	if portPath == "" {
 		targetSerial := serialFlag
 		if targetSerial == "" {
-			targetSerial = os.Getenv("NRF52840_HSM_SERIAL")
+			targetSerial = os.Getenv("HSM_SERIAL")
+			if targetSerial == "" {
+				targetSerial = os.Getenv("NRF52840_HSM_SERIAL")
+			}
 		}
 		discovered, err := serial.AutoDiscoverPortTargeting(targetSerial)
 		if err != nil {
@@ -68,7 +86,7 @@ func getATClient() (*domain.ATClient, func(), error) {
 			if errors.As(err, &multErr) {
 				return nil, nil, multErr
 			}
-			return nil, nil, fmt.Errorf("no nRF52840 HSM Dongle detected: %w (plug in device, specify --port or --serial, or set NRF52840_HSM_PORT/NRF52840_HSM_SERIAL)", err)
+			return nil, nil, fmt.Errorf("no HSM USB device detected: %w (plug in device, specify --port or --serial, or set HSM_PORT/HSM_SERIAL)", err)
 		}
 		portPath = discovered
 	}
@@ -102,14 +120,17 @@ func getService() (*usecases.HSMService, func(), error) {
 	if portPath == "" {
 		targetSerial := serialFlag
 		if targetSerial == "" {
-			targetSerial = os.Getenv("NRF52840_HSM_SERIAL")
+			targetSerial = os.Getenv("HSM_SERIAL")
+			if targetSerial == "" {
+				targetSerial = os.Getenv("NRF52840_HSM_SERIAL")
+			}
 		}
 		ports, err := serial.FindDonglePortsTargeting(targetSerial)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to scan serial ports: %w", err)
 		}
 		if len(ports) == 0 {
-			return nil, nil, fmt.Errorf("no nRF52840 HSM Dongle detected. Please plug in the device or specify --port / --serial")
+			return nil, nil, fmt.Errorf("no HSM USB device detected. Please plug in the device or specify --port / --serial")
 		}
 		portPath = ports[0]
 	}
