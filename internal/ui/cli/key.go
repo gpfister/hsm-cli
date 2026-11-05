@@ -26,7 +26,7 @@ func newKeyCmd() *cobra.Command {
 func newKeyListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
-		Short: "List stored private/public key slots (AT+SLOTS?)",
+		Short: "List stored private/public key slots",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, cleanup, err := getATClient()
 			if err != nil {
@@ -67,7 +67,7 @@ func newKeyGenerateCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "generate",
-		Short: "Generate secp256r1 keypair using hardware TRNG (AT+KEYGEN)",
+		Short: "Generate secp256r1 keypair using hardware TRNG",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if slot < 1 || slot > 16 {
 				return fmt.Errorf("--slot must be between 1 and 16 (got %d)", slot)
@@ -107,7 +107,7 @@ func newKeyPubkeyCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "pubkey",
-		Short: "Display uncompressed public key point from specified slot (AT+PUBKEY)",
+		Short: "Display uncompressed public key point from specified slot",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if slot < 1 || slot > 16 {
 				return fmt.Errorf("--slot must be between 1 and 16 (got %d)", slot)
@@ -144,7 +144,7 @@ func newKeySignCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "sign",
-		Short: "Sign a 32-byte SHA-256 digest with specified key using hardware accelerator (AT+SIGN)",
+		Short: "Sign a 32-byte SHA-256 digest with specified key using hardware accelerator",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if slot < 1 || slot > 16 {
 				return fmt.Errorf("--slot must be between 1 and 16 (got %d)", slot)

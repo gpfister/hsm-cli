@@ -1,18 +1,18 @@
 # ==============================================================================
-# nrf52840-hsm-cli (hsmutil) Makefile
+# nrf52840-hsm-cli (gphsm) Makefile
 # Cross-platform compilation for macOS, Linux, and Windows
 # ==============================================================================
 
 SHELL := /bin/bash
-BINARY_NAME := hsmutil
+BINARY_NAME := gphsm
 BIN_DIR := bin
-SRC_PKG := ./cmd/hsmutil
+SRC_PKG := ./cmd/gphsm
 
 .PHONY: help all build build-all test clean
 
 help:
 	@echo "=================================================================="
-	@echo "                   hsmutil CLI Build Automation                   "
+	@echo "                    gphsm CLI Build Automation                    "
 	@echo "=================================================================="
 	@echo "Targets:"
 	@echo "  make build          Build '$(BINARY_NAME)' (static binary, CGO_ENABLED=0)"
@@ -28,7 +28,9 @@ build:
 	@echo "[INFO] Building $(BINARY_NAME) (pure static binary, CGO_ENABLED=0)..."
 	CGO_ENABLED=0 go build -ldflags="-s -w" -o $(BIN_DIR)/$(BINARY_NAME) $(SRC_PKG)
 	@ln -sf $(BINARY_NAME) $(BIN_DIR)/$(BINARY_NAME)s
-	@echo "[SUCCESS] Host binary generated: $(BIN_DIR)/$(BINARY_NAME) (symlink: $(BIN_DIR)/$(BINARY_NAME)s)"
+	@ln -sf $(BINARY_NAME) $(BIN_DIR)/hsmutil
+	@ln -sf $(BINARY_NAME) $(BIN_DIR)/hsmutils
+	@echo "[SUCCESS] Host binary generated: $(BIN_DIR)/$(BINARY_NAME) (symlinks: $(BINARY_NAME)s, hsmutil, hsmutils)"
 
 build-all:
 	@mkdir -p $(BIN_DIR)

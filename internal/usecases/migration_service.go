@@ -75,6 +75,27 @@ func (s *MigrationService) ExecuteMigration(sourceClient, targetClient *domain.A
 	fmt.Fprintf(s.out, "           DUAL-DEVICE BLIND KEY MIGRATION (SLOT %d)                            \n", slotID)
 	fmt.Fprintln(s.out, "================================================================================")
 
+	// Pre-flight: verify homogeneous authentication mode
+	sourceStatus, err := sourceClient.Status()
+	if err != nil {
+		return fmt.Errorf("failed to query source HSM status: %w", err)
+	}
+	targetStatus, err := targetClient.Status()
+	if err != nil {
+		return fmt.Errorf("failed to query target HSM status: %w", err)
+	}
+
+	if !targetStatus.Configured {
+		return fmt.Errorf("target HSM is not configured (method NONE). Initialize target HSM with method %s before migrating keys", sourceStatus.Method)
+	}
+	if !sourceStatus.Configured {
+		return fmt.Errorf("source HSM is not configured (method NONE). Initialize source HSM before migrating keys")
+	}
+	if sourceStatus.Method != targetStatus.Method {
+		return fmt.Errorf("%w: source device is using %s authentication, but target device is using %s authentication (both devices must use the same authentication method)",
+			domain.ErrMismatchedAuthMethod, sourceStatus.Method, targetStatus.Method)
+	}
+
 	// Step 1: Target ephemeral ECDH init
 	fmt.Fprintln(s.out, "[Step 1/5] Initializing target HSM ephemeral ECDH keypair...")
 	targetEphemeralPub, err := targetClient.TargetInit()
@@ -89,7 +110,7 @@ func (s *MigrationService) ExecuteMigration(sourceClient, targetClient *domain.A
 
 	// Step 2: Source HSM authentication (turn-by-turn unlock if needed)
 	fmt.Fprintln(s.out, "[Step 2/5] Verifying source HSM authentication status...")
-	sourceStatus, err := sourceClient.Status()
+	sourceStatus, err = sourceClient.Status()
 	if err != nil {
 		return fmt.Errorf("failed to query source HSM status: %w", err)
 	}
@@ -193,9 +214,30 @@ func (s *MigrationService) ExecuteDeviceMigration(sourceClient, targetClient *do
 	fmt.Fprintln(s.out, "                 FULL DEVICE MIGRATION & CLONING CEREMONY                       ")
 	fmt.Fprintln(s.out, "================================================================================")
 
+	// Pre-flight: verify homogeneous authentication mode
+	sourceStatus, err := sourceClient.Status()
+	if err != nil {
+		return fmt.Errorf("failed to query source HSM status: %w", err)
+	}
+	targetStatus, err := targetClient.Status()
+	if err != nil {
+		return fmt.Errorf("failed to query target HSM status: %w", err)
+	}
+
+	if !targetStatus.Configured {
+		return fmt.Errorf("target HSM is not configured (method NONE). Initialize target HSM with method %s before migrating keys", sourceStatus.Method)
+	}
+	if !sourceStatus.Configured {
+		return fmt.Errorf("source HSM is not configured (method NONE). Initialize source HSM before migrating keys")
+	}
+	if sourceStatus.Method != targetStatus.Method {
+		return fmt.Errorf("%w: source device is using %s authentication, but target device is using %s authentication (both devices must use the same authentication method)",
+			domain.ErrMismatchedAuthMethod, sourceStatus.Method, targetStatus.Method)
+	}
+
 	// Step 1: Verify source HSM authentication
 	fmt.Fprintln(s.out, "[Step 1/5] Verifying source HSM authentication status...")
-	sourceStatus, err := sourceClient.Status()
+	sourceStatus, err = sourceClient.Status()
 	if err != nil {
 		return fmt.Errorf("failed to query source HSM status: %w", err)
 	}
@@ -210,7 +252,7 @@ func (s *MigrationService) ExecuteDeviceMigration(sourceClient, targetClient *do
 
 	// Step 2: Verify target HSM authentication
 	fmt.Fprintln(s.out, "[Step 2/5] Verifying target HSM authentication status...")
-	targetStatus, err := targetClient.Status()
+	targetStatus, err = targetClient.Status()
 	if err != nil {
 		return fmt.Errorf("failed to query target HSM status: %w", err)
 	}

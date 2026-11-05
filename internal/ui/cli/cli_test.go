@@ -18,7 +18,6 @@ func TestCLI_CommandStructure(t *testing.T) {
 		"unlock",
 		"key",
 		"random",
-		"pkcs11",
 		"echo",
 	}
 
@@ -46,9 +45,6 @@ func TestCLI_CommandStructure(t *testing.T) {
 		}
 	}
 
-	if !cmdMap["p11"] {
-		t.Errorf("expected alias 'p11' for pkcs11 command group")
-	}
 	if !cmdMap["auth"] {
 		t.Errorf("expected alias 'auth' for unlock command")
 	}
@@ -189,23 +185,6 @@ func TestCLI_KeySubcommands(t *testing.T) {
 	}
 }
 
-func TestCLI_P11Subcommands(t *testing.T) {
-	p11Cmd := newP11Cmd()
-	subCmds := p11Cmd.Commands()
-
-	expected := []string{"info", "slots", "init-token", "keygen", "sign", "test"}
-	found := make(map[string]bool)
-	for _, c := range subCmds {
-		found[c.Name()] = true
-	}
-
-	for _, name := range expected {
-		if !found[name] {
-			t.Errorf("expected pkcs11 subcommand %q to be registered", name)
-		}
-	}
-}
-
 func TestCLI_HelpOutput(t *testing.T) {
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
@@ -216,8 +195,8 @@ func TestCLI_HelpOutput(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, "hsmutil") {
-		t.Errorf("expected help output to mention hsmutil, got: %s", output)
+	if !strings.Contains(output, "gphsm") {
+		t.Errorf("expected help output to mention gphsm, got: %s", output)
 	}
 
 	// Terminology neutrality check: no occurrences of nrf52840
@@ -321,5 +300,71 @@ func TestErrMultipleDevicesDetected_Format(t *testing.T) {
 	}
 	if !strings.Contains(msg, "--port (-p) or --serial (-s)") {
 		t.Errorf("expected disambiguation advice in error, got: %s", msg)
+	}
+}
+
+func TestInitCmd_FlagRegistration(t *testing.T) {
+	cmd := newInitCmd()
+	modeFlag := cmd.Flags().Lookup("mode")
+	if modeFlag == nil {
+		t.Errorf("expected --mode flag to be registered")
+	}
+	pinFlag := cmd.Flags().Lookup("pin")
+	if pinFlag == nil {
+		t.Errorf("expected --pin flag to be registered")
+	}
+	threshFlag := cmd.Flags().Lookup("threshold")
+	if threshFlag == nil {
+		t.Errorf("expected --threshold flag to be registered")
+	}
+}
+
+func TestUnlockCmd_FlagRegistration(t *testing.T) {
+	cmd := newUnlockCmd()
+	pinFlag := cmd.Flags().Lookup("pin")
+	if pinFlag == nil {
+		t.Errorf("expected --pin flag to be registered")
+	}
+	threshFlag := cmd.Flags().Lookup("threshold")
+	if threshFlag == nil {
+		t.Errorf("expected --threshold flag to be registered")
+	}
+}
+
+func TestVerifyHomogeneousMigration(t *testing.T) {
+	// Both PIN
+	srcPIN := &domain.DeviceStatus{Configured: true, Method: "PIN"}
+	tgtPIN := &domain.DeviceStatus{Configured: true, Method: "PIN"}
+	if err := verifyHomogeneousMigration(srcPIN, tgtPIN); err != nil {
+		t.Errorf("expected homogeneous PIN migration to succeed, got: %v", err)
+	}
+
+	// Both SHAMIR
+	srcShamir := &domain.DeviceStatus{Configured: true, Method: "SHAMIR"}
+	tgtShamir := &domain.DeviceStatus{Configured: true, Method: "SHAMIR"}
+	if err := verifyHomogeneousMigration(srcShamir, tgtShamir); err != nil {
+		t.Errorf("expected homogeneous SHAMIR migration to succeed, got: %v", err)
+	}
+
+	// Mismatched: SHAMIR -> PIN
+	if err := verifyHomogeneousMigration(srcShamir, tgtPIN); err == nil {
+		t.Errorf("expected mismatched migration to fail")
+	}
+
+	// Mismatched: PIN -> SHAMIR
+	if err := verifyHomogeneousMigration(srcPIN, tgtShamir); err == nil {
+		t.Errorf("expected mismatched migration to fail")
+	}
+
+	// Target unconfigured
+	tgtUnconf := &domain.DeviceStatus{Configured: false, Method: "NONE"}
+	if err := verifyHomogeneousMigration(srcPIN, tgtUnconf); err == nil {
+		t.Errorf("expected unconfigured target to fail")
+	}
+
+	// Source unconfigured
+	srcUnconf := &domain.DeviceStatus{Configured: false, Method: "NONE"}
+	if err := verifyHomogeneousMigration(srcUnconf, tgtPIN); err == nil {
+		t.Errorf("expected unconfigured source to fail")
 	}
 }

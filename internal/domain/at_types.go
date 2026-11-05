@@ -3,6 +3,8 @@ package domain
 // DeviceStatus represents the authentication and key store status returned by AT+STATUS?.
 type DeviceStatus struct {
 	Authenticated    bool
+	Configured       bool
+	Method           string // "NONE", "PIN", "SHAMIR"
 	RetriesRemaining int
 	KeyCount         int
 }

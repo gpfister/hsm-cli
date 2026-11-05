@@ -80,7 +80,7 @@ func TestATClient_Info(t *testing.T) {
 func TestATClient_Status(t *testing.T) {
 	mt := newMockTransport()
 	mt.responses["AT+STATUS?"] = []string{
-		`+STATUS: AUTH=1,RETRIES=3,KEYCOUNT=4`,
+		`+STATUS: AUTH=1,CONFIGURED=1,METHOD=SHAMIR,RETRIES=3,KEYCOUNT=4`,
 	}
 
 	client := NewATClient(mt)
@@ -92,11 +92,74 @@ func TestATClient_Status(t *testing.T) {
 	if !status.Authenticated {
 		t.Errorf("expected Authenticated=true")
 	}
+	if !status.Configured {
+		t.Errorf("expected Configured=true")
+	}
+	if status.Method != "SHAMIR" {
+		t.Errorf("expected Method=SHAMIR, got %s", status.Method)
+	}
 	if status.RetriesRemaining != 3 {
 		t.Errorf("expected Retries=3, got %d", status.RetriesRemaining)
 	}
 	if status.KeyCount != 4 {
 		t.Errorf("expected KeyCount=4, got %d", status.KeyCount)
+	}
+
+	// Test unconfigured status
+	mt.responses["AT+STATUS?"] = []string{
+		`+STATUS: AUTH=0,CONFIGURED=0,METHOD=NONE,RETRIES=3,KEYCOUNT=0`,
+	}
+	status, err = client.Status()
+	if err != nil {
+		t.Fatalf("Status unconfigured failed: %v", err)
+	}
+	if status.Configured {
+		t.Errorf("expected Configured=false")
+	}
+	if status.Method != "NONE" {
+		t.Errorf("expected Method=NONE, got %s", status.Method)
+	}
+}
+
+func TestATClient_InitPin(t *testing.T) {
+	mt := newMockTransport()
+	mt.responses["AT+INIT=PIN,Tr0ub4dor&3"] = []string{"OK"}
+
+	client := NewATClient(mt)
+	if err := client.InitPin("Tr0ub4dor&3"); err != nil {
+		t.Fatalf("InitPin failed: %v", err)
+	}
+	if mt.lastCommand != "AT+INIT=PIN,Tr0ub4dor&3" {
+		t.Errorf("expected command 'AT+INIT=PIN,Tr0ub4dor&3', got %s", mt.lastCommand)
+	}
+
+	// Empty PIN check
+	if err := client.InitPin(""); err == nil {
+		t.Errorf("expected error on empty PIN")
+	}
+}
+
+func TestATClient_InitShamir(t *testing.T) {
+	mt := newMockTransport()
+	mt.responses["AT+INIT=SHAMIR"] = []string{
+		`+SHARE: 1,0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20,abandon`,
+		`+SHARE: 2,0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20,ability`,
+		`+SHARE: 3,0302030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20,able`,
+		`+SHARE: 4,0402030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20,about`,
+		`+SHARE: 5,0502030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20,above`,
+	}
+
+	client := NewATClient(mt)
+	res, err := client.InitShamir()
+	if err != nil {
+		t.Fatalf("InitShamir failed: %v", err)
+	}
+
+	if res.Threshold != 3 || res.Total != 5 {
+		t.Errorf("unexpected threshold parameters: %d/%d", res.Threshold, res.Total)
+	}
+	if len(res.Shares) != 5 {
+		t.Fatalf("expected 5 shares, got %d", len(res.Shares))
 	}
 }
 

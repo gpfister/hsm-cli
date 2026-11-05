@@ -227,7 +227,7 @@ func newDeviceMigrateCmd() *cobra.Command {
 		Short: "Migrate all cryptographic key slots from source HSM to target HSM",
 		Long: `Full device migration: discovers all occupied slots on the source HSM,
 encrypts and transfers each slot using target ephemeral ECDH wrapping, verifies target digests,
-and executes fail-fast lockdown (AT+LOCK on both devices) on any error.
+and executes fail-fast lockdown on any error.
 Optionally zeroizes the source device upon completion (--zeroize-source).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if targetPort == "" {
@@ -260,6 +260,33 @@ Optionally zeroizes the source device upon completion (--zeroize-source).`,
 			tgtResolved, err := serial.ResolvePortOrSerial(targetPort)
 			if err != nil {
 				return fmt.Errorf("resolving --target: %w", err)
+			}
+
+			// Pre-flight check: homogeneous authentication validation
+			srcTransport, err := serial.OpenAT(srcResolved)
+			if err != nil {
+				return fmt.Errorf("connecting to source HSM: %w", err)
+			}
+			srcClient := domain.NewATClient(srcTransport)
+			srcStatus, err := srcClient.Status()
+			_ = srcTransport.Close()
+			if err != nil {
+				return fmt.Errorf("failed to query source HSM status: %w", err)
+			}
+
+			tgtTransport, err := serial.OpenAT(tgtResolved)
+			if err != nil {
+				return fmt.Errorf("connecting to target HSM: %w", err)
+			}
+			tgtClient := domain.NewATClient(tgtTransport)
+			tgtStatus, err := tgtClient.Status()
+			_ = tgtTransport.Close()
+			if err != nil {
+				return fmt.Errorf("failed to query target HSM status: %w", err)
+			}
+
+			if err := verifyHomogeneousMigration(srcStatus, tgtStatus); err != nil {
+				return err
 			}
 
 			if zeroizeSource && !yesFlag {
@@ -323,7 +350,7 @@ func newRandomCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "random",
-		Short: "Generate hardware random bytes using TRNG (AT+RANDOM)",
+		Short: "Generate hardware random bytes using TRNG",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if length < 1 || length > 128 {
 				return fmt.Errorf("--len must be between 1 and 128 bytes (got %d)", length)

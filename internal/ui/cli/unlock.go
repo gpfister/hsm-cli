@@ -16,14 +16,15 @@ import (
 
 type pinModel struct {
 	textInput textinput.Model
+	title     string
 	err       error
 	value     string
 	aborted   bool
 }
 
-func initialPinModel() pinModel {
+func initialPinModel(title, placeholder string) pinModel {
 	ti := textinput.New()
-	ti.Placeholder = "Enter HSM PIN"
+	ti.Placeholder = placeholder
 	ti.EchoMode = textinput.EchoPassword
 	ti.EchoCharacter = '•'
 	ti.Focus()
@@ -32,6 +33,7 @@ func initialPinModel() pinModel {
 
 	return pinModel{
 		textInput: ti,
+		title:     title,
 	}
 }
 
@@ -63,13 +65,14 @@ func (m pinModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m pinModel) View() string {
 	return fmt.Sprintf(
-		"Enter HSM PIN:\n\n%s\n\n(press Enter to submit, Esc to cancel)\n",
+		"%s\n\n%s\n\n(press Enter to submit, Esc to cancel)\n",
+		m.title,
 		m.textInput.View(),
 	)
 }
 
-func promptPINBubbleTea() (string, error) {
-	p := tea.NewProgram(initialPinModel())
+func promptPINBubbleTeaWithTitle(title, placeholder string) (string, error) {
+	p := tea.NewProgram(initialPinModel(title, placeholder))
 	m, err := p.Run()
 	if err != nil {
 		return "", fmt.Errorf("interactive PIN prompt failed: %w", err)
@@ -82,6 +85,10 @@ func promptPINBubbleTea() (string, error) {
 		return "", finalModel.err
 	}
 	return finalModel.value, nil
+}
+
+func promptPINBubbleTea() (string, error) {
+	return promptPINBubbleTeaWithTitle("Enter HSM PIN:", "Enter HSM PIN")
 }
 
 func newUnlockCmd() *cobra.Command {
@@ -99,48 +106,78 @@ func newUnlockCmd() *cobra.Command {
 			}
 			defer cleanup()
 
-			if thresholdMode {
-				ceremony := usecases.NewCeremonyService()
+			status, err := client.Status()
+			if err != nil {
+				return fmt.Errorf("failed to query device status: %w", err)
+			}
+
+			if !status.Configured {
+				return fmt.Errorf("Device is not initialized. Run 'gphsm device init' first.")
+			}
+
+			if status.Authenticated {
+				fmt.Fprintln(cmd.OutOrStdout(), "Device is already authenticated.")
+				return nil
+			}
+
+			if status.Method == "PIN" {
+				if thresholdMode {
+					return fmt.Errorf("device is configured for PIN mode, but --threshold was specified")
+				}
+				if pin == "" && len(args) > 0 {
+					pin = args[0]
+				}
+				if pin == "" {
+					pin = os.Getenv("GPHSM_PIN")
+					if pin == "" {
+						pin = os.Getenv("HSM_PIN")
+					}
+				}
+				if pin == "" {
+					// Interactive TTY detection
+					if isatty.IsTerminal(os.Stdin.Fd()) || isatty.IsCygwinTerminal(os.Stdin.Fd()) {
+						p, err := promptPINBubbleTea()
+						if err != nil {
+							return err
+						}
+						pin = p
+					} else {
+						// Non-interactive / headless fallback: read single line from stdin
+						reader := bufio.NewReader(cmd.InOrStdin())
+						line, err := reader.ReadString('\n')
+						if err == nil || len(line) > 0 {
+							pin = strings.TrimSpace(line)
+						}
+					}
+				}
+				if pin == "" {
+					return fmt.Errorf("PIN is required: supply via --pin, pipe to stdin, or set GPHSM_PIN")
+				}
+
+				if err := client.Auth(pin); err != nil {
+					return fmt.Errorf("authentication failed: %w", err)
+				}
+
+				fmt.Fprintln(cmd.OutOrStdout(), "✓ [OK] HSM Session Authenticated & Unlocked! LED transitioned to solid GREEN.")
+				return nil
+			}
+
+			if status.Method == "SHAMIR" {
+				if pin != "" {
+					return fmt.Errorf("device is configured for Shamir Secret Sharing, but --pin was specified")
+				}
+				ceremony := usecases.NewCeremonyServiceWithIO(cmd.InOrStdin(), cmd.OutOrStdout())
 				if _, err := ceremony.RunTurnByTurnAuth(client); err != nil {
 					return fmt.Errorf("threshold authentication ceremony failed: %w", err)
 				}
 				return nil
 			}
 
-			if pin == "" && len(args) > 0 {
-				pin = args[0]
-			}
-			if pin == "" {
-				// Interactive TTY detection
-				if isatty.IsTerminal(os.Stdin.Fd()) || isatty.IsCygwinTerminal(os.Stdin.Fd()) {
-					p, err := promptPINBubbleTea()
-					if err != nil {
-						return err
-					}
-					pin = p
-				} else {
-					// Non-interactive / headless fallback: read single line from stdin
-					reader := bufio.NewReader(cmd.InOrStdin())
-					line, err := reader.ReadString('\n')
-					if err == nil || len(line) > 0 {
-						pin = strings.TrimSpace(line)
-					}
-				}
-			}
-			if pin == "" {
-				return fmt.Errorf("PIN is required: supply via --pin, pipe to stdin, or use --threshold")
-			}
-
-			if err := client.Auth(pin); err != nil {
-				return fmt.Errorf("authentication failed: %w", err)
-			}
-
-			fmt.Println("✓ [OK] HSM Session Authenticated & Unlocked! LED transitioned to solid GREEN.")
-			return nil
+			return fmt.Errorf("unsupported authentication method: %s", status.Method)
 		},
 	}
 
-	cmd.Flags().StringVar(&pin, "pin", "", "User PIN (4..16 characters)")
+	cmd.Flags().StringVar(&pin, "pin", "", "User PIN (10..64 characters)")
 	cmd.Flags().BoolVarP(&thresholdMode, "threshold", "t", false, "Execute turn-by-turn custodian threshold unlock ceremony")
 	return cmd
 }
@@ -153,7 +190,7 @@ func newAuthCmd() *cobra.Command {
 func newLockCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "lock",
-		Short: "Invalidate authentication session and lock the HSM (AT+LOCK)",
+		Short: "Invalidate authentication session and lock the HSM",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, cleanup, err := getATClient()
 			if err != nil {
@@ -176,11 +213,11 @@ func newResetCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "reset",
-		Short: "Factory reset device, zeroizing all persistent keys and Shamir secrets (AT+RESET)",
+		Short: "Factory reset device, zeroizing all persistent keys and secrets",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !yesFlag {
 				fmt.Fprintln(cmd.OutOrStdout(), "WARNING: This operation will perform a destructive factory reset on the HSM.")
-				fmt.Fprintln(cmd.OutOrStdout(), "All persistent private keys, cryptographic material, and Shamir secrets will be permanently destroyed.")
+				fmt.Fprintln(cmd.OutOrStdout(), "All persistent private keys, cryptographic material, and secrets will be permanently destroyed.")
 				fmt.Fprintln(cmd.OutOrStdout(), "The device will transition to an unconfigured state (pulsating blue LED).")
 				fmt.Fprint(cmd.OutOrStdout(), "\nAre you sure you want to proceed? (yes/no): ")
 
@@ -204,8 +241,8 @@ func newResetCmd() *cobra.Command {
 			}
 
 			fmt.Fprintln(cmd.OutOrStdout(), "✓ [OK] HSM Factory Reset Complete!")
-			fmt.Fprintln(cmd.OutOrStdout(), "All persistent keys and Shamir secrets have been wiped.")
-			fmt.Fprintln(cmd.OutOrStdout(), "The device is now in an unconfigured state. Run 'hsmutil device init --threshold' to reconfigure.")
+			fmt.Fprintln(cmd.OutOrStdout(), "All persistent keys and secrets have been wiped.")
+			fmt.Fprintln(cmd.OutOrStdout(), "The device is now in an unconfigured state. Run 'gphsm device init' to reconfigure.")
 			return nil
 		},
 	}

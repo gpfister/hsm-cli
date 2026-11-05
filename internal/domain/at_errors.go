@@ -1,8 +1,16 @@
 package domain
 
 import (
+	"errors"
 	"fmt"
 	"strings"
+)
+
+// Authentication and configuration errors.
+var (
+	ErrAlreadyConfigured    = errors.New("device is already configured")
+	ErrInvalidAuthMode      = errors.New("invalid authentication mode: must be PIN or SHAMIR")
+	ErrMismatchedAuthMethod = errors.New("source and target devices have mismatched authentication methods")
 )
 
 // ErrMultipleDevicesDetected is returned when multiple HSM dongles are detected during auto-discovery

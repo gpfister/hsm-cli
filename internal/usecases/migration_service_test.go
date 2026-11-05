@@ -61,12 +61,12 @@ func TestMigrationService_ExecuteMigration_Success(t *testing.T) {
 	}
 	targetTransport.responses["AT+LOCK"] = []string{`OK`}
 	targetTransport.responses["AT+STATUS?"] = []string{
-		`+STATUS: AUTH=0,RETRIES=3,KEYCOUNT=1`,
+		`+STATUS: AUTH=0,CONFIGURED=1,METHOD=SHAMIR,RETRIES=3,KEYCOUNT=1`,
 	}
 
 	// Source expectations (already unlocked)
 	sourceTransport.responses["AT+STATUS?"] = []string{
-		`+STATUS: AUTH=1,RETRIES=3,KEYCOUNT=1`,
+		`+STATUS: AUTH=1,CONFIGURED=1,METHOD=SHAMIR,RETRIES=3,KEYCOUNT=1`,
 	}
 	sourceTransport.responses["AT+MIGRATE=WRAP,1,"+targetPub] = []string{
 		`+WRAP: 1,EC_P256,` + targetPub + `,cipher123,tag456,nonce789`,
@@ -120,7 +120,7 @@ func TestMigrationService_ExecuteDeviceMigration_Success(t *testing.T) {
 	slotPub := "04aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
 
 	// Source setup: authenticated, has slot 1
-	sourceTransport.responses["AT+STATUS?"] = []string{`+STATUS: AUTH=1,RETRIES=3,KEYCOUNT=1`}
+	sourceTransport.responses["AT+STATUS?"] = []string{`+STATUS: AUTH=1,CONFIGURED=1,METHOD=SHAMIR,RETRIES=3,KEYCOUNT=1`}
 	sourceTransport.responses["AT+SLOTS?"] = []string{
 		`+SLOTS: 1, EC_P256, 256, "Key1"`,
 		`OK`,
@@ -135,7 +135,7 @@ func TestMigrationService_ExecuteDeviceMigration_Success(t *testing.T) {
 	sourceTransport.responses["AT+LOCK"] = []string{`OK`}
 
 	// Target setup: authenticated
-	targetTransport.responses["AT+STATUS?"] = []string{`+STATUS: AUTH=1,RETRIES=3,KEYCOUNT=0`}
+	targetTransport.responses["AT+STATUS?"] = []string{`+STATUS: AUTH=1,CONFIGURED=1,METHOD=SHAMIR,RETRIES=3,KEYCOUNT=0`}
 	targetTransport.responses["AT+MIGRATE=INIT_TARGET"] = []string{`+TARGET: ` + targetPub}
 	targetTransport.responses["AT+MIGRATE=UNWRAP,1,EC_P256,"+targetPub+",cipher123,tag456,nonce789"] = []string{`OK`}
 	targetTransport.responses["AT+PUBKEY=1"] = []string{
@@ -167,7 +167,7 @@ func TestMigrationService_ExecuteDeviceMigration_FailFastLockdown(t *testing.T) 
 	targetPub := "040102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
 
 	// Source setup: authenticated, has slot 1
-	sourceTransport.responses["AT+STATUS?"] = []string{`+STATUS: AUTH=1,RETRIES=3,KEYCOUNT=1`}
+	sourceTransport.responses["AT+STATUS?"] = []string{`+STATUS: AUTH=1,CONFIGURED=1,METHOD=SHAMIR,RETRIES=3,KEYCOUNT=1`}
 	sourceTransport.responses["AT+SLOTS?"] = []string{
 		`+SLOTS: 1, EC_P256, 256, "Key1"`,
 		`OK`,
@@ -178,7 +178,7 @@ func TestMigrationService_ExecuteDeviceMigration_FailFastLockdown(t *testing.T) 
 	sourceTransport.responses["AT+LOCK"] = []string{`OK`}
 
 	// Target setup: unwrap fails
-	targetTransport.responses["AT+STATUS?"] = []string{`+STATUS: AUTH=1,RETRIES=3,KEYCOUNT=0`}
+	targetTransport.responses["AT+STATUS?"] = []string{`+STATUS: AUTH=1,CONFIGURED=1,METHOD=SHAMIR,RETRIES=3,KEYCOUNT=0`}
 	targetTransport.responses["AT+MIGRATE=INIT_TARGET"] = []string{`+TARGET: ` + targetPub}
 	targetTransport.responses["AT+MIGRATE=UNWRAP,1,EC_P256,"+targetPub+",cipher123,tag456,nonce789"] = []string{
 		`+CME ERROR: 6 (Cryptographic accelerator failure)`,
@@ -217,5 +217,51 @@ func TestMigrationService_ExecuteDeviceMigration_FailFastLockdown(t *testing.T) 
 	}
 	if !strings.Contains(out.String(), "[FAIL-FAST LOCKDOWN]") {
 		t.Errorf("expected [FAIL-FAST LOCKDOWN] banner in output, got: %s", out.String())
+	}
+}
+
+func TestMigrationService_MismatchedAuthMethodAborts(t *testing.T) {
+	sourceTransport := newMockMigrationTransport()
+	targetTransport := newMockMigrationTransport()
+
+	// Source is SHAMIR, Target is PIN
+	sourceTransport.responses["AT+STATUS?"] = []string{`+STATUS: AUTH=1,CONFIGURED=1,METHOD=SHAMIR,RETRIES=3,KEYCOUNT=1`}
+	targetTransport.responses["AT+STATUS?"] = []string{`+STATUS: AUTH=0,CONFIGURED=1,METHOD=PIN,RETRIES=3,KEYCOUNT=1`}
+	sourceTransport.responses["AT+LOCK"] = []string{`OK`}
+	targetTransport.responses["AT+LOCK"] = []string{`OK`}
+
+	sourceClient := domain.NewATClient(sourceTransport)
+	targetClient := domain.NewATClient(targetTransport)
+
+	svc := usecases.NewMigrationService(nil, nil)
+	err := svc.ExecuteMigration(sourceClient, targetClient, 1)
+	if err == nil {
+		t.Fatalf("expected error on mismatched authentication method, got nil")
+	}
+	if !errors.Is(err, domain.ErrMismatchedAuthMethod) {
+		t.Errorf("expected ErrMismatchedAuthMethod, got: %v", err)
+	}
+}
+
+func TestMigrationService_UnconfiguredTargetAborts(t *testing.T) {
+	sourceTransport := newMockMigrationTransport()
+	targetTransport := newMockMigrationTransport()
+
+	// Source is configured, Target is unconfigured
+	sourceTransport.responses["AT+STATUS?"] = []string{`+STATUS: AUTH=1,CONFIGURED=1,METHOD=PIN,RETRIES=3,KEYCOUNT=1`}
+	targetTransport.responses["AT+STATUS?"] = []string{`+STATUS: AUTH=0,CONFIGURED=0,METHOD=NONE,RETRIES=3,KEYCOUNT=0`}
+	sourceTransport.responses["AT+LOCK"] = []string{`OK`}
+	targetTransport.responses["AT+LOCK"] = []string{`OK`}
+
+	sourceClient := domain.NewATClient(sourceTransport)
+	targetClient := domain.NewATClient(targetTransport)
+
+	svc := usecases.NewMigrationService(nil, nil)
+	err := svc.ExecuteMigration(sourceClient, targetClient, 1)
+	if err == nil {
+		t.Fatalf("expected error on unconfigured target, got nil")
+	}
+	if !strings.Contains(err.Error(), "target HSM is not configured") {
+		t.Errorf("expected target unconfigured error message, got: %v", err)
 	}
 }

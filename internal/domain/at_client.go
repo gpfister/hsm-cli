@@ -389,9 +389,11 @@ func parseStatusLine(line string) (*DeviceStatus, error) {
 	content := strings.TrimSpace(strings.TrimPrefix(line, "+STATUS:"))
 	status := &DeviceStatus{
 		RetriesRemaining: 3,
+		Method:           "NONE",
 	}
 
 	params := splitQuotedCsv(content)
+	hasConfigured := false
 	for _, p := range params {
 		parts := strings.SplitN(p, "=", 2)
 		if len(parts) != 2 {
@@ -403,6 +405,11 @@ func parseStatusLine(line string) (*DeviceStatus, error) {
 		switch key {
 		case "AUTH":
 			status.Authenticated = (val == "1" || strings.EqualFold(val, "true"))
+		case "CONFIGURED":
+			status.Configured = (val == "1" || strings.EqualFold(val, "true"))
+			hasConfigured = true
+		case "METHOD":
+			status.Method = strings.ToUpper(val)
 		case "RETRIES":
 			if r, err := strconv.Atoi(val); err == nil {
 				status.RetriesRemaining = r
@@ -412,6 +419,20 @@ func parseStatusLine(line string) (*DeviceStatus, error) {
 				status.KeyCount = k
 			}
 		}
+	}
+
+	// Backward compatibility fallback: if CONFIGURED is omitted, infer from AUTH, KeyCount, or METHOD
+	if !hasConfigured {
+		if status.Authenticated || status.KeyCount > 0 || status.Method != "NONE" {
+			status.Configured = true
+		}
+	}
+
+	if status.Configured && status.Method == "NONE" {
+		status.Method = "PIN"
+	}
+	if !status.Configured {
+		status.Method = "NONE"
 	}
 
 	return status, nil
@@ -531,6 +552,50 @@ func splitQuotedCsv(s string) []string {
 	}
 
 	return entries
+}
+
+// InitPin initializes the HSM in PIN authentication mode via AT+INIT=PIN,<pin>.
+func (c *ATClient) InitPin(pin string) error {
+	if pin == "" {
+		return errors.New("PIN cannot be empty")
+	}
+	_, err := c.transport.SendCommand(fmt.Sprintf("AT+INIT=PIN,%s", pin), 5*time.Second)
+	return err
+}
+
+// InitShamir initializes the HSM in Shamir Secret Sharing mode via AT+INIT=SHAMIR.
+// It generates a master secret and returns 5 custodian shares with a 3-of-5 threshold.
+func (c *ATClient) InitShamir() (*ThresholdInitResult, error) {
+	lines, err := c.transport.SendCommand("AT+INIT=SHAMIR", 10*time.Second)
+	if err != nil {
+		// Fallback to AT+INIT=THRESHOLD,3,5 if AT+INIT=SHAMIR unsupported
+		if errors.Is(err, ErrCommandUnsupported) || strings.Contains(err.Error(), "unsupported") {
+			return c.ThresholdInit(3, 5)
+		}
+		return nil, err
+	}
+
+	var shares []CustodianShare
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		if strings.HasPrefix(trimmed, "+SHARE:") {
+			share, err := parseShareLine(trimmed)
+			if err != nil {
+				return nil, err
+			}
+			shares = append(shares, *share)
+		}
+	}
+
+	if len(shares) == 0 {
+		return nil, errors.New("no custodian shares returned by HSM")
+	}
+
+	return &ThresholdInitResult{
+		Threshold: 3,
+		Total:     len(shares),
+		Shares:    shares,
+	}, nil
 }
 
 // ThresholdInit executes threshold initialization (e.g. 3-of-5) via AT+INIT=THRESHOLD,<k>,<n>.

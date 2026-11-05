@@ -97,9 +97,24 @@ func (s *CeremonyService) RunTurnByTurnInit(client ATCeremonyClient) ([]domain.C
 	}
 
 	// 1. Trigger threshold initialization on the HSM
-	result, err := client.ThresholdInit(3, 5)
-	if err != nil {
-		return nil, fmt.Errorf("threshold initialization failed on HSM: %w", err)
+	var result *domain.ThresholdInitResult
+	if sc, ok := client.(interface {
+		InitShamir() (*domain.ThresholdInitResult, error)
+	}); ok {
+		var initErr error
+		result, initErr = sc.InitShamir()
+		if initErr != nil {
+			result, initErr = client.ThresholdInit(3, 5)
+			if initErr != nil {
+				return nil, fmt.Errorf("threshold initialization failed on HSM: %w", initErr)
+			}
+		}
+	} else {
+		var initErr error
+		result, initErr = client.ThresholdInit(3, 5)
+		if initErr != nil {
+			return nil, fmt.Errorf("threshold initialization failed on HSM: %w", initErr)
+		}
 	}
 
 	shares := result.Shares

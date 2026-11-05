@@ -15,12 +15,12 @@ var (
 	portFlag   string
 	serialFlag string
 	rootCmd    = &cobra.Command{
-		Use:   "hsmutil",
-		Short: "hsmutil — Command-line interface for the Hardware Security Module (HSM) USB Key",
-		Long: `hsmutil is the command-line interface for managing and testing
+		Use:   "gphsm",
+		Short: "gphsm — Command-line interface for the Hardware Security Module (HSM) USB Key",
+		Long: `gphsm is the command-line interface for managing and testing
 the Hardware Security Module (HSM) USB key, supporting device lifecycle operations
-(init, reset, lock, firmware), AT-style ASCII serial protocol, PKCS#11 diagnostics,
-and dual-stage secure boot.`,
+(init, reset, lock, firmware), AT-style ASCII serial protocol, dual-mode authentication
+(PIN and Shamir), and dual-stage secure boot.`,
 	}
 )
 
@@ -35,7 +35,6 @@ func init() {
 	rootCmd.AddCommand(newKeyCmd())
 	rootCmd.AddCommand(newEchoCmd())
 	rootCmd.AddCommand(newRandomCmd())
-	rootCmd.AddCommand(newP11Cmd())
 
 	// Backward-compatible hidden aliases on rootCmd for legacy workflows
 	legacyInfo := newDeviceInfoCmd()
