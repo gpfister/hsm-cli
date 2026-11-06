@@ -339,9 +339,104 @@ func TestCMEError_ParseAndFormatting(t *testing.T) {
 		t.Errorf("expected %q, got %q", expectedStr, err.Error())
 	}
 
+	err41 := ParseCMEError(41)
+	if !errors.Is(err41, ErrAlreadyConfigured) {
+		t.Errorf("expected ErrAlreadyConfigured for 41, got %v", err41)
+	}
+	if err41.Error() != "+CME ERROR: 41 (Device is already configured)" {
+		t.Errorf("unexpected error string for 41: %q", err41.Error())
+	}
+
+	err42 := ParseCMEError(42)
+	if !errors.Is(err42, ErrInvalidAuthMode) {
+		t.Errorf("expected ErrInvalidAuthMode for 42, got %v", err42)
+	}
+	if err42.Error() != "+CME ERROR: 42 (Invalid authentication mode: must be PIN or SHAMIR)" {
+		t.Errorf("unexpected error string for 42: %q", err42.Error())
+	}
+
+	err103 := ParseCMEError(103)
+	if !errors.Is(err103, ErrDuplicateShare) {
+		t.Errorf("expected ErrDuplicateShare for 103, got %v", err103)
+	}
+	if err103.Error() != "+CME ERROR: 103 (Duplicate custodian share presentation)" {
+		t.Errorf("unexpected error string for 103: %q", err103.Error())
+	}
+
 	unknownErr := ParseCMEError(99)
 	if !strings.Contains(unknownErr.Error(), "+CME ERROR: 99") {
 		t.Errorf("expected unknown code in error string, got %s", unknownErr.Error())
+	}
+}
+
+func TestATClient_InitShamir_WithInitPrefix(t *testing.T) {
+	mt := newMockTransport()
+	mt.responses["AT+INIT=SHAMIR"] = []string{
+		`+INIT: 1,0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20`,
+		`+INIT: 2,0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20`,
+		`+INIT: 3,0302030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20`,
+		`+INIT: 4,0402030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20`,
+		`+INIT: 5,0502030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20`,
+	}
+
+	client := NewATClient(mt)
+	res, err := client.InitShamir()
+	if err != nil {
+		t.Fatalf("InitShamir failed: %v", err)
+	}
+
+	if res.Threshold != 3 || res.Total != 5 {
+		t.Errorf("unexpected threshold parameters: %d/%d", res.Threshold, res.Total)
+	}
+	if len(res.Shares) != 5 {
+		t.Fatalf("expected 5 shares, got %d", len(res.Shares))
+	}
+	if res.Shares[0].Index != 1 || res.Shares[0].Share != "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20" {
+		t.Errorf("unexpected share 1: %+v", res.Shares[0])
+	}
+}
+
+func TestATClient_InitShamir_FallbackToInit1(t *testing.T) {
+	mt := newMockTransport()
+	mt.errors["AT+INIT=SHAMIR"] = ErrCommandUnsupported
+	mt.responses["AT+INIT=1"] = []string{
+		`+INIT: 1,0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20`,
+		`+INIT: 2,0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20`,
+		`+INIT: 3,0302030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20`,
+		`+INIT: 4,0402030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20`,
+		`+INIT: 5,0502030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20`,
+	}
+
+	client := NewATClient(mt)
+	res, err := client.InitShamir()
+	if err != nil {
+		t.Fatalf("InitShamir fallback failed: %v", err)
+	}
+
+	if mt.lastCommand != "AT+INIT=1" {
+		t.Errorf("expected last command to be 'AT+INIT=1', got %s", mt.lastCommand)
+	}
+	if len(res.Shares) != 5 {
+		t.Fatalf("expected 5 shares, got %d", len(res.Shares))
+	}
+}
+
+func TestATClient_InitShamir_FallbackOnUnsupportedErrorString(t *testing.T) {
+	mt := newMockTransport()
+	mt.errors["AT+INIT=SHAMIR"] = errors.New("+CME ERROR: 8 (command unsupported)")
+	mt.responses["AT+INIT=1"] = []string{
+		`+SHARE: 1,0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20,abandon`,
+		`+SHARE: 2,0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20,ability`,
+		`+SHARE: 3,0302030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20,able`,
+	}
+
+	client := NewATClient(mt)
+	res, err := client.InitShamir()
+	if err != nil {
+		t.Fatalf("InitShamir fallback failed: %v", err)
+	}
+	if len(res.Shares) != 3 {
+		t.Fatalf("expected 3 shares, got %d", len(res.Shares))
 	}
 }
 
@@ -402,6 +497,91 @@ func TestATClient_SubmitShare(t *testing.T) {
 	}
 	if _, err := client.SubmitShare(1, ""); err == nil {
 		t.Errorf("expected error on empty share")
+	}
+}
+
+func TestATClient_SubmitShare_WithShareAcceptancePrefix(t *testing.T) {
+	mt := newMockTransport()
+	mt.responses["AT+SHARE=1,aabbcc"] = []string{
+		`+SHARE: 1/3 ACCEPTED,WORD="abandon"`,
+	}
+	mt.responses["AT+SHARE=2,ddeeff"] = []string{
+		`+SHARE: 2/3 ACCEPTED,WORD=123`,
+	}
+	mt.responses["AT+SHARE=3,112233"] = []string{
+		`+SHARE: 3/3 ACCEPTED,QUORUM_MET,WORD="able"`,
+	}
+
+	client := NewATClient(mt)
+
+	c1, err := client.SubmitShare(1, "aabbcc")
+	if err != nil {
+		t.Fatalf("SubmitShare 1 failed: %v", err)
+	}
+	if c1.Index != 1 || c1.Word != "abandon" {
+		t.Errorf("unexpected c1: %+v", c1)
+	}
+
+	c2, err := client.SubmitShare(2, "ddeeff")
+	if err != nil {
+		t.Fatalf("SubmitShare 2 failed: %v", err)
+	}
+	if c2.Index != 2 || c2.Word != "123" {
+		t.Errorf("unexpected c2: %+v", c2)
+	}
+
+	c3, err := client.SubmitShare(3, "112233")
+	if err != nil {
+		t.Fatalf("SubmitShare 3 failed: %v", err)
+	}
+	if c3.Index != 3 || c3.Word != "able" {
+		t.Errorf("unexpected c3: %+v", c3)
+	}
+}
+
+func TestParseShareLine_Formats(t *testing.T) {
+	// 1. Positional +SHARE: with commitment word
+	s1, err := parseShareLine("+SHARE: 1,aabbccddeeff,abandon")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s1.Index != 1 || s1.Share != "aabbccddeeff" || s1.CommitmentWord != "abandon" {
+		t.Errorf("unexpected s1: %+v", s1)
+	}
+
+	// 2. Positional +INIT: without commitment word
+	s2, err := parseShareLine("+INIT: 2,112233445566")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s2.Index != 2 || s2.Share != "112233445566" || s2.CommitmentWord != "" {
+		t.Errorf("unexpected s2: %+v", s2)
+	}
+
+	// 3. Key-Value +SHARE:
+	s3, err := parseShareLine(`+SHARE: INDEX=3,SHARE="cafebabe",WORD="ability"`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s3.Index != 3 || s3.Share != "cafebabe" || s3.CommitmentWord != "ability" {
+		t.Errorf("unexpected s3: %+v", s3)
+	}
+
+	// 4. Key-Value +INIT:
+	s4, err := parseShareLine(`+INIT: ID=4,KEY="deadbeef",COMMIT="about"`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s4.Index != 4 || s4.Share != "deadbeef" || s4.CommitmentWord != "about" {
+		t.Errorf("unexpected s4: %+v", s4)
+	}
+
+	// 5. Malformed lines
+	if _, err := parseShareLine("+INIT: invalid"); err == nil {
+		t.Errorf("expected error on malformed line")
+	}
+	if _, err := parseShareLine("+SHARE: abc,def"); err == nil {
+		t.Errorf("expected error on non-integer index")
 	}
 }
 
