@@ -2,7 +2,7 @@
 
 Cross-platform command-line administration utility for the Hardware Security Module (HSM) USB key ecosystem, built in Go using Cobra and Charm's Bubble Tea micro-components following Clean Architecture.
 
-`gphsm` compiles as a 100% hermetic static binary (`CGO_ENABLED=0`) with zero external dynamic runtime dependencies. It supports direct AT-style ASCII protocol communication over dedicated CDC-ACM serial endpoints (`VID 0x1209`, `PID 0x0001`), dual-mode authentication (PIN protected with Yocto `pam_pwquality` validation vs. 3-of-5 Shamir Secret Sharing), key generation and signing, dual-device homogeneous key migration ceremonies, and dual-stage secure boot updates.
+`gphsm` compiles natively on macOS (`CGO_ENABLED=1` linking against macOS IOKit and CoreFoundation for hardware USB enumeration) and as 100% hermetic static binaries on Linux and Windows (`CGO_ENABLED=0`). It supports direct AT-style ASCII protocol communication over dedicated CDC-ACM serial endpoints (`VID 0x1209`, `PID 0x0001`), dual-mode authentication (PIN protected with Yocto `pam_pwquality` validation vs. 3-of-5 Shamir Secret Sharing), key generation and signing, dual-device homogeneous key migration ceremonies, and dual-stage secure boot updates.
 
 ---
 
@@ -85,15 +85,8 @@ For devices initialized in PIN mode, `gphsm` enforces security parity with the Y
 ## 3. Backward Compatibility & Ergonomic Aliases
 
 To preserve existing operator muscle memory, scripts, and CI/CD pipelines:
-1. **Backward-Compatible Symlinks**:
-   Building `gphsm` automatically generates relative symbolic links:
-   ```bash
-   bin/gphsms  -> gphsm
-   bin/hsmutil -> gphsm
-   bin/hsmutils -> gphsm
-   ```
-2. **Hidden Root Aliases**: Legacy root-level commands (`gphsm info`, `gphsm reset`, `gphsm lock`, `gphsm init`, `gphsm firmware`, `gphsm status`) remain registered on `rootCmd` as hidden aliases.
-3. **Top-Level Convenience Aliases**:
+1. **Hidden Root Aliases**: Legacy root-level commands (`gphsm info`, `gphsm reset`, `gphsm lock`, `gphsm init`, `gphsm firmware`, `gphsm status`) remain registered on `rootCmd` as hidden aliases.
+2. **Top-Level Convenience Aliases**:
    - `gphsm devices`: Direct top-level alias for `gphsm device list`.
    - `gphsm auth`: Direct top-level alias for `gphsm unlock`.
 
@@ -136,21 +129,23 @@ To prevent security policy downgrades or operational lockout, migration operatio
 
 ---
 
-## 7. Build Automation & Static Compilation
+## 7. Build Automation & Compilation
 
-All binaries are compiled with `CGO_ENABLED=0` to guarantee 100% static linkage with zero C runtime dependencies:
+Binaries are compiled with target-optimized build configurations:
+- **macOS (Darwin)**: Compiled with `CGO_ENABLED=1` and `-ldflags="-w"` for native dynamic linking with macOS IOKit and CoreFoundation to perform USB device enumeration.
+- **Linux & Windows**: Compiled with `CGO_ENABLED=0` and `-ldflags="-s -w"` guaranteeing 100% hermetic static linkage with zero external C runtime dependencies.
 
 ```bash
-make build       # Build host static binary in bin/gphsm (creates symlinks gphsms, hsmutil, hsmutils)
-make build-all   # Cross-compile static binaries for all 5 target architectures
+make build       # Build host binary in bin/gphsm
+make build-all   # Cross-compile binaries for all 5 target architectures
 make test        # Run Go unit and component tests
-make clean       # Remove compiled binaries and symlinks
+make clean       # Remove compiled binaries
 ```
 
 ### Target Architectures
 
-- `darwin/arm64` (Apple Silicon macOS)
-- `linux/arm64` (Raspberry Pi 64-bit Yocto appliance / ARM servers)
-- `linux/amd64` (Standard x86_64 Linux servers & workstations)
-- `windows/arm64` (Surface Pro / Windows on ARM)
-- `windows/amd64` (Standard Windows x86_64)
+- `darwin/arm64` (Apple Silicon macOS — dynamic IOKit / CoreFoundation linking)
+- `linux/arm64` (Raspberry Pi 64-bit Yocto appliance / ARM servers — hermetic static)
+- `linux/amd64` (Standard x86_64 Linux servers & workstations — hermetic static)
+- `windows/arm64` (Surface Pro / Windows on ARM — hermetic static)
+- `windows/amd64` (Standard Windows x86_64 — hermetic static)

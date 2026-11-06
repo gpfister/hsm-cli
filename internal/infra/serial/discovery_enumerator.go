@@ -1,4 +1,4 @@
-//go:build (darwin && cgo) || linux || windows
+//go:build darwin || linux || windows
 
 package serial
 
