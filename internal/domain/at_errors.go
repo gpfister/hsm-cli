@@ -8,8 +8,9 @@ import (
 
 // Authentication and configuration errors.
 var (
-	ErrAlreadyConfigured    = errors.New("device is already configured")
-	ErrInvalidAuthMode      = errors.New("invalid authentication mode: must be PIN or SHAMIR")
+	ErrAlreadyConfigured    = &CMEError{Code: 41, Message: "Device is already configured"}
+	ErrInvalidAuthMode      = &CMEError{Code: 42, Message: "Invalid authentication mode: must be PIN or SHAMIR"}
+	ErrDuplicateShare       = &CMEError{Code: 103, Message: "Duplicate custodian share presentation"}
 	ErrMismatchedAuthMethod = errors.New("source and target devices have mismatched authentication methods")
 )
 
@@ -79,6 +80,12 @@ func ParseCMEError(code int) error {
 		return ErrBufferOverflow
 	case 8:
 		return ErrCommandUnsupported
+	case 41:
+		return ErrAlreadyConfigured
+	case 42:
+		return ErrInvalidAuthMode
+	case 103:
+		return ErrDuplicateShare
 	default:
 		return &CMEError{Code: code, Message: "Unknown hardware error"}
 	}

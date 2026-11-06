@@ -568,17 +568,21 @@ func (c *ATClient) InitPin(pin string) error {
 func (c *ATClient) InitShamir() (*ThresholdInitResult, error) {
 	lines, err := c.transport.SendCommand("AT+INIT=SHAMIR", 10*time.Second)
 	if err != nil {
-		// Fallback to AT+INIT=THRESHOLD,3,5 if AT+INIT=SHAMIR unsupported
+		// Fallback to AT+INIT=1 if AT+INIT=SHAMIR unsupported
 		if errors.Is(err, ErrCommandUnsupported) || strings.Contains(err.Error(), "unsupported") {
-			return c.ThresholdInit(3, 5)
+			lines, err = c.transport.SendCommand("AT+INIT=1", 10*time.Second)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, err
 		}
-		return nil, err
 	}
 
 	var shares []CustodianShare
 	for _, l := range lines {
 		trimmed := strings.TrimSpace(l)
-		if strings.HasPrefix(trimmed, "+SHARE:") {
+		if strings.HasPrefix(trimmed, "+SHARE:") || strings.HasPrefix(trimmed, "+INIT:") {
 			share, err := parseShareLine(trimmed)
 			if err != nil {
 				return nil, err
@@ -612,7 +616,7 @@ func (c *ATClient) ThresholdInit(threshold, total int) (*ThresholdInitResult, er
 	var shares []CustodianShare
 	for _, l := range lines {
 		trimmed := strings.TrimSpace(l)
-		if strings.HasPrefix(trimmed, "+SHARE:") {
+		if strings.HasPrefix(trimmed, "+SHARE:") || strings.HasPrefix(trimmed, "+INIT:") {
 			share, err := parseShareLine(trimmed)
 			if err != nil {
 				return nil, err
@@ -648,7 +652,7 @@ func (c *ATClient) SubmitShare(index int, shareHex string) (*WordCommitment, err
 
 	for _, l := range lines {
 		trimmed := strings.TrimSpace(l)
-		if strings.HasPrefix(trimmed, "+COMMIT:") || strings.HasPrefix(trimmed, "+WORD:") {
+		if strings.HasPrefix(trimmed, "+COMMIT:") || strings.HasPrefix(trimmed, "+WORD:") || strings.HasPrefix(trimmed, "+SHARE:") {
 			return parseCommitLine(trimmed, index)
 		}
 	}
@@ -720,7 +724,13 @@ func (c *ATClient) MigrateUnwrap(env *MigrationEnvelope) error {
 }
 
 func parseShareLine(line string) (*CustodianShare, error) {
-	content := strings.TrimSpace(strings.TrimPrefix(line, "+SHARE:"))
+	content := strings.TrimSpace(line)
+	for _, prefix := range []string{"+SHARE:", "+INIT:"} {
+		if strings.HasPrefix(content, prefix) {
+			content = strings.TrimSpace(strings.TrimPrefix(content, prefix))
+			break
+		}
+	}
 	if strings.Contains(content, "=") {
 		parts := strings.Split(content, ",")
 		var share CustodianShare
@@ -747,7 +757,7 @@ func parseShareLine(line string) (*CustodianShare, error) {
 
 	parts := strings.Split(content, ",")
 	if len(parts) < 2 {
-		return nil, fmt.Errorf("malformed +SHARE line: %s", line)
+		return nil, fmt.Errorf("malformed share line: %s", line)
 	}
 	idx, err := strconv.Atoi(strings.TrimSpace(parts[0]))
 	if err != nil {
@@ -768,10 +778,11 @@ func parseShareLine(line string) (*CustodianShare, error) {
 
 func parseCommitLine(line string, fallbackIndex int) (*WordCommitment, error) {
 	content := strings.TrimSpace(line)
-	if strings.HasPrefix(content, "+COMMIT:") {
-		content = strings.TrimSpace(strings.TrimPrefix(content, "+COMMIT:"))
-	} else if strings.HasPrefix(content, "+WORD:") {
-		content = strings.TrimSpace(strings.TrimPrefix(content, "+WORD:"))
+	for _, prefix := range []string{"+COMMIT:", "+WORD:", "+SHARE:"} {
+		if strings.HasPrefix(content, prefix) {
+			content = strings.TrimSpace(strings.TrimPrefix(content, prefix))
+			break
+		}
 	}
 
 	if strings.Contains(content, "=") {
