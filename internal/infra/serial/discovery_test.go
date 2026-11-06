@@ -382,3 +382,59 @@ func TestResolvePortOrSerial(t *testing.T) {
 		t.Errorf("ResolvePortOrSerial(serial) = (%q, %v)", p, err)
 	}
 }
+
+func TestFindDonglePortsTargeting_NoDonglesReturnsEmpty(t *testing.T) {
+	orig := enumerateDonglesFn
+	defer func() { enumerateDonglesFn = orig }()
+
+	t.Setenv("HSM_PORT", "")
+	t.Setenv("NRF52840_HSM_PORT", "")
+	t.Setenv("HSM_SERIAL", "")
+	t.Setenv("NRF52840_HSM_SERIAL", "")
+
+	enumerateDonglesFn = func() ([]domain.DiscoveredDongle, error) {
+		return []domain.DiscoveredDongle{}, nil
+	}
+
+	ports, err := FindDonglePortsTargeting("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ports) != 0 {
+		t.Errorf("expected 0 ports when no dongles connected, got %v", ports)
+	}
+}
+
+func TestFindDonglePortsTargeting_PrioritizedPorts(t *testing.T) {
+	orig := enumerateDonglesFn
+	defer func() { enumerateDonglesFn = orig }()
+
+	t.Setenv("HSM_PORT", "")
+	t.Setenv("NRF52840_HSM_PORT", "")
+	t.Setenv("HSM_SERIAL", "")
+	t.Setenv("NRF52840_HSM_SERIAL", "")
+
+	enumerateDonglesFn = func() ([]domain.DiscoveredDongle, error) {
+		return []domain.DiscoveredDongle{
+			{
+				Serial:      "F4CE368F12AB",
+				DataPort:    "/dev/tty.usbmodemF4CE368F12AB3",
+				ConsolePort: "/dev/tty.usbmodemF4CE368F12AB1",
+			},
+		}, nil
+	}
+
+	ports, err := FindDonglePortsTargeting("F4CE368F12AB")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ports) != 2 {
+		t.Fatalf("expected 2 ports, got %d (%v)", len(ports), ports)
+	}
+	if ports[0] != "/dev/tty.usbmodemF4CE368F12AB3" {
+		t.Errorf("expected data port with suffix 3 first, got %s", ports[0])
+	}
+	if ports[1] != "/dev/tty.usbmodemF4CE368F12AB1" {
+		t.Errorf("expected console port with suffix 1 second, got %s", ports[1])
+	}
+}

@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/gpfister/nrf52840-hsm-cli/internal/domain"
-	"go.bug.st/serial"
 )
 
 // NormalizeSerial strips delimiters (colons, hyphens, spaces) and uppercases a serial or BLE address.
@@ -119,95 +118,6 @@ func SortPortsByPriority(ports []string) {
 	})
 }
 
-// fallbackEnumerateDongles inspects serial.GetPortsList() when detailed USB enumeration is not active.
-func fallbackEnumerateDongles() ([]domain.DiscoveredDongle, error) {
-	list, err := serial.GetPortsList()
-	if err != nil {
-		return nil, err
-	}
-
-	// Filter for USB CDC-ACM candidates
-	var candidates []string
-	hasTTY := make(map[string]bool)
-	for _, p := range list {
-		if strings.HasPrefix(p, "/dev/tty.usbmodem") {
-			hasTTY[strings.TrimPrefix(p, "/dev/tty.")] = true
-		}
-	}
-
-	for _, p := range list {
-		lower := strings.ToLower(p)
-		if strings.Contains(lower, "usbmodem") || strings.Contains(lower, "ttyacm") || strings.Contains(lower, "com") {
-			// Skip cu.usbmodem if corresponding tty.usbmodem is present
-			if strings.HasPrefix(p, "/dev/cu.") {
-				baseSuffix := strings.TrimPrefix(p, "/dev/cu.")
-				if hasTTY[baseSuffix] {
-					continue
-				}
-			}
-			candidates = append(candidates, p)
-		}
-	}
-
-	if len(candidates) == 0 {
-		return nil, nil
-	}
-
-	// Group by prefix without trailing interface digit
-	groups := make(map[string][]string)
-	var groupOrder []string
-
-	for _, c := range candidates {
-		key := stripTrailingDigit(c)
-		if _, exists := groups[key]; !exists {
-			groupOrder = append(groupOrder, key)
-		}
-		groups[key] = append(groups[key], c)
-	}
-
-	var results []domain.DiscoveredDongle
-	for _, key := range groupOrder {
-		ports := groups[key]
-		var dataPort, consolePort string
-
-		for _, p := range ports {
-			if strings.HasSuffix(p, "3") {
-				dataPort = p
-			} else if strings.HasSuffix(p, "1") {
-				consolePort = p
-			} else if dataPort == "" {
-				dataPort = p
-			} else if consolePort == "" {
-				consolePort = p
-			}
-		}
-
-		if dataPort == "" && len(ports) > 0 {
-			dataPort = ports[0]
-		}
-
-		serialNum := ExtractBLEAddressFromPort(dataPort)
-		if serialNum == "" && consolePort != "" {
-			serialNum = ExtractBLEAddressFromPort(consolePort)
-		}
-		if serialNum == "" {
-			serialNum = filepath.Base(key)
-		}
-
-		results = append(results, domain.DiscoveredDongle{
-			Serial:       NormalizeSerial(serialNum),
-			DataPort:     dataPort,
-			ConsolePort:  consolePort,
-			VID:          "1209",
-			PID:          "0001",
-			Product:      "nRF52840 HSM Dongle",
-			Manufacturer: "pid.codes",
-		})
-	}
-
-	return results, nil
-}
-
 var enumerateDonglesFn = defaultEnumerateDongles
 
 // scanHSMDevNodes checks for custom /dev/tty.hsm* nodes registered by nrf52840-hsm-kmod
@@ -255,20 +165,18 @@ func scanHSMDevNodes() ([]domain.DiscoveredDongle, error) {
 	return results, nil
 }
 
-// defaultEnumerateDongles inspects USB enumerators and fallback port scans for nRF52840 dongles.
+// defaultEnumerateDongles inspects USB enumerators for nRF52840 dongles.
 func defaultEnumerateDongles() ([]domain.DiscoveredDongle, error) {
 	if hsmDongles, err := scanHSMDevNodes(); err == nil && len(hsmDongles) > 0 {
 		return hsmDongles, nil
 	}
 
 	detailed, err := getDetailedDongles()
-	if err == nil && len(detailed) > 0 {
-		return detailed, nil
+	if err != nil {
+		return nil, err
 	}
-
-	fallback, err := fallbackEnumerateDongles()
-	if err == nil && len(fallback) > 0 {
-		return fallback, nil
+	if len(detailed) > 0 {
+		return detailed, nil
 	}
 
 	var dongles []domain.DiscoveredDongle
@@ -346,36 +254,7 @@ func FindDonglePortsTargeting(targetSerial string) ([]string, error) {
 
 	SortPortsByPriority(ports)
 
-	if len(ports) > 0 {
-		return ports, nil
-	}
-
-	// Direct port scan fallback
-	list, err := serial.GetPortsList()
-	if err != nil {
-		return nil, err
-	}
-
-	var fallbackMatches []string
-	for _, name := range list {
-		lower := strings.ToLower(name)
-		if strings.Contains(lower, "usbmodem") || strings.Contains(lower, "ttyacm") || strings.Contains(lower, "com") {
-			if targetSerial == "" || strings.Contains(strings.ToUpper(name), NormalizeSerial(targetSerial)) {
-				fallbackMatches = append(fallbackMatches, name)
-			}
-		}
-	}
-
-	SortPortsByPriority(fallbackMatches)
-	if len(fallbackMatches) > 0 {
-		return fallbackMatches, nil
-	}
-
-	if targetSerial != "" {
-		return nil, nil
-	}
-
-	return list, nil
+	return ports, nil
 }
 
 // AutoDiscoverPortTargeting locates and selects the HSM AT command serial port for a specific serial / BLE target.
