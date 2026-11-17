@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/gpfister/nrf52840-hsm-cli/internal/domain"
@@ -128,6 +127,11 @@ func (s *CeremonyService) RunTurnByTurnInit(client ATCeremonyClient) ([]domain.C
 	for i, share := range shares {
 		custodianNum := i + 1
 
+		formattedShare, err := domain.FormatCustodianShare(share.Index, share.Share)
+		if err != nil {
+			return nil, fmt.Errorf("failed formatting custodian share %d: %w", share.Index, err)
+		}
+
 		ClearTerminalAndScrollback(s.Out)
 
 		fmt.Fprintln(s.Out, "================================================================================")
@@ -146,15 +150,16 @@ func (s *CeremonyService) RunTurnByTurnInit(client ATCeremonyClient) ([]domain.C
 		fmt.Fprintf(s.Out, "              PRIVATE SECRET SHARE — CUSTODIAN #%d                             \n", custodianNum)
 		fmt.Fprintln(s.Out, "================================================================================")
 		fmt.Fprintf(s.Out, " Custodian Index: %d\n", share.Index)
-		fmt.Fprintf(s.Out, " Secret Share:    %s\n", share.Share)
+		fmt.Fprintf(s.Out, " Formatted Share: %s\n", formattedShare)
 		if share.CommitmentWord != "" {
 			fmt.Fprintf(s.Out, " Commitment Word: %s\n", share.CommitmentWord)
 		}
 		fmt.Fprintln(s.Out, "--------------------------------------------------------------------------------")
 		fmt.Fprintln(s.Out, "CRITICAL INSTRUCTIONS:")
-		fmt.Fprintln(s.Out, " 1. Record your secret share in an offline, tamper-evident physical medium.")
-		fmt.Fprintln(s.Out, " 2. Never store this share on a computer, phone, or connected system.")
-		fmt.Fprintln(s.Out, " 3. At least 3 of 5 custodian shares are required to unlock this HSM.")
+		fmt.Fprintln(s.Out, " 1. Record your COMPLETE formatted share including index and checksum suffix.")
+		fmt.Fprintln(s.Out, " 2. Format: <index>-<64_hex_share>-<8_hex_crc32> (e.g. 1-AAAA...-BBBB).")
+		fmt.Fprintln(s.Out, " 3. Never store this share on a computer, phone, or connected system.")
+		fmt.Fprintln(s.Out, " 4. At least 3 of 5 custodian shares are required to unlock this HSM.")
 		fmt.Fprintln(s.Out, "================================================================================")
 		fmt.Fprintln(s.Out, "")
 		fmt.Fprint(s.Out, "Once securely recorded, press [ENTER] to PURGE the screen and summon the next custodian...")
@@ -200,18 +205,7 @@ func (s *CeremonyService) RunTurnByTurnAuth(client ATCeremonyClient) ([]domain.C
 		ClearTerminalAndScrollback(s.Out)
 		fmt.Fprintf(s.Out, "--- Custodian Turn %d of 3 ---\n", turn)
 
-		// Custodian index prompt
-		fmt.Fprintf(s.Out, "Enter your Custodian Index (1-5) [default %d]: ", turn)
-		idxStr, _ := reader.ReadString('\n')
-		idxStr = strings.TrimSpace(idxStr)
-		idx := turn
-		if idxStr != "" {
-			if parsed, err := strconv.Atoi(idxStr); err == nil && parsed >= 1 && parsed <= 5 {
-				idx = parsed
-			}
-		}
-
-		shareInput, err := s.ReadMaskedPassword(fmt.Sprintf("Enter Custodian #%d Secret Share (masked): ", idx))
+		shareInput, err := s.ReadMaskedPassword("Enter Custodian Secret Share (masked): ")
 		if err != nil {
 			return nil, fmt.Errorf("failed reading share input: %w", err)
 		}
@@ -219,8 +213,23 @@ func (s *CeremonyService) RunTurnByTurnAuth(client ATCeremonyClient) ([]domain.C
 			return nil, errors.New("share cannot be empty")
 		}
 
+		idx, shareHex, err := domain.ParseCustodianShare(shareInput)
+		if err != nil {
+			if errors.Is(err, domain.ErrRawShareDetected) {
+				fmt.Fprintln(s.Out, "✗ Error: Legacy raw 64-hex share detected.")
+				fmt.Fprintln(s.Out, "  Formatted shares with index and checksum (<index>-<share>-<crc32>) are required to prevent hardware lockout.")
+			} else if errors.Is(err, domain.ErrInvalidShareChecksum) {
+				fmt.Fprintln(s.Out, "✗ Checksum mismatch! Potential transcription typo.")
+				fmt.Fprintln(s.Out, "  (Hardware retry counter was NOT decremented)")
+			} else {
+				fmt.Fprintf(s.Out, "✗ Format Error: %v\n", err)
+				fmt.Fprintln(s.Out, "  Expected format: <index>-<64_hex_share>-<8_hex_crc32>")
+			}
+			return nil, fmt.Errorf("share validation failed for turn %d: %w", turn, err)
+		}
+
 		// Submit share to HSM
-		commitment, err := client.SubmitShare(idx, shareInput)
+		commitment, err := client.SubmitShare(idx, shareHex)
 		if err != nil {
 			return nil, fmt.Errorf("HSM rejected share for custodian #%d: %w", idx, err)
 		}
@@ -228,7 +237,7 @@ func (s *CeremonyService) RunTurnByTurnAuth(client ATCeremonyClient) ([]domain.C
 		commitmentWords = append(commitmentWords, commitment.Word)
 		submittedShares = append(submittedShares, domain.CustodianShare{
 			Index:          idx,
-			Share:          shareInput,
+			Share:          shareHex,
 			CommitmentWord: commitment.Word,
 		})
 

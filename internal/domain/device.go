@@ -25,10 +25,10 @@ func (s DeviceState) String() string {
 
 // DeviceInfo represents hardware and firmware telemetry returned by AT+INFO? or legacy queries.
 type DeviceInfo struct {
-	Firmware   string
-	Hardware   string
-	UID        string
-	Boot       string
+	Firmware string
+	Hardware string
+	UID      string
+	Boot     string
 
 	// Legacy binary packet compatibility fields
 	Major      uint8

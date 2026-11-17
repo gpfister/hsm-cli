@@ -26,7 +26,8 @@ func newInitCmd() *cobra.Command {
 		Long: `Initialize the Hardware Security Module (HSM) in one of two mutually exclusive
 authentication modes:
   1. PIN Mode: Protected by a high-complexity passphrase conforming to Yocto pam_pwquality policy.
-  2. Shamir Secret Sharing: Master secret split across 5 custodians requiring a 3-of-5 threshold.`,
+  2. Shamir Secret Sharing: Master secret split across 5 custodians requiring a 3-of-5 threshold.
+     Emits self-verifying formatted custodian shares (<index>-<64_hex_share>-<8_hex_crc32>).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, cleanup, err := getATClient()
 			if err != nil {
