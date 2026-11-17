@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/gpfister/nrf52840-hsm-cli/internal/usecases"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
@@ -99,6 +99,14 @@ func newUnlockCmd() *cobra.Command {
 		Use:     "unlock",
 		Aliases: []string{"auth"},
 		Short:   "Authenticate User PIN or execute threshold ceremony to unlock the HSM",
+		Long: `Authenticate the Hardware Security Module (HSM) to transition the device to an
+unlocked state (solid GREEN LED).
+
+Authentication methods supported:
+  1. PIN Mode: Supply user PIN interactively, via --pin flag, or through GPHSM_PIN env var.
+  2. Shamir Secret Sharing: Turn-by-turn custodian ceremony requiring 3 of 5 formatted
+     custodian shares (<index>-<64_hex_share>-<8_hex_crc32>). Each share is verified offline
+     via CRC-32 before submission to protect hardware retry counters.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, cleanup, err := getATClient()
 			if err != nil {

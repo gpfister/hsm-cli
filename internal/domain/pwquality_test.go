@@ -97,11 +97,11 @@ func TestValidatePIN_MissingCharacterClasses(t *testing.T) {
 
 func TestValidatePIN_ConsecutiveIdenticalCharacters(t *testing.T) {
 	repeats := []string{
-		"Tr0ub4ddor&3",  // dd
-		"Tr00ub4dor&3",  // 00
-		"Tr0ub4dor&&3",  // &&
-		"TTr0ub4dor&3",  // TT
-		"Tr0ub4dor&33",  // 33
+		"Tr0ub4ddor&3", // dd
+		"Tr00ub4dor&3", // 00
+		"Tr0ub4dor&&3", // &&
+		"TTr0ub4dor&3", // TT
+		"Tr0ub4dor&33", // 33
 	}
 
 	for _, pin := range repeats {

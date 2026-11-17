@@ -2,8 +2,8 @@ package protocol
 
 import (
 	"bytes"
-	"testing"
 	"github.com/gpfister/nrf52840-hsm-cli/internal/domain"
+	"testing"
 )
 
 func TestEncodeDecodeEcho(t *testing.T) {

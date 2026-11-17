@@ -11,10 +11,10 @@ import (
 )
 
 type mockPort struct {
-	readBuf     *bytes.Buffer
-	writeBuf    *bytes.Buffer
-	replyOnCmd  string
-	closed      bool
+	readBuf    *bytes.Buffer
+	writeBuf   *bytes.Buffer
+	replyOnCmd string
+	closed     bool
 }
 
 func newMockPort(reply string) *mockPort {
