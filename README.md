@@ -40,7 +40,7 @@ gphsm
 - **`gphsm device info`**: Query device build version, hardware model, unique device UID, active port, and bootloader stage.
 - **`gphsm device init [--mode pin|shamir] [--pin <pin>] [--threshold]`**: Initialize device authentication mode:
   - **PIN Mode**: Sets up password protection. Enforces Yocto-compliant `pam_pwquality` complexity (min 10 characters, upper, lower, digit, special, max 1 consecutive identical character, max 2 sequential monotonic characters). Supports `--pin` and `GPHSM_PIN` env var.
-  - **Shamir Mode**: Turn-by-turn 3-of-5 custodian initialization ceremony.
+  - **Shamir Mode**: Turn-by-turn 3-of-5 custodian initialization ceremony emitting self-contained 75-character formatted custodian shares (`<index>-<64_hex_share>-<8_hex_crc32>`, e.g. `1-E4C2...-9F8120B4`). The embedded IEEE 802.3 CRC-32 checksum enables fail-fast offline validation during recovery, protecting hardware retry counters.
 - **`gphsm device lock`**: Invalidate active authenticated session and return device to locked state (solid RED LED).
 - **`gphsm device reset [-y/--yes]`**: Factory reset the HSM, irreversibly zeroizing all persistent private keys and secrets, restoring unconfigured state (pulsating BLUE LED). Safeguarded by an interactive confirmation prompt or bypassed via `-y`.
 - **`gphsm device status`**: Query authentication state, configuration status, configured authentication method (`NONE`, `PIN`, `SHAMIR`), remaining PIN retries, and stored key count.
@@ -60,7 +60,7 @@ gphsm
 
 - **`gphsm unlock [--pin <pin>] [--threshold]`** (Alias: `auth`): Automatically detects device configuration mode:
   - In **PIN Mode**: Prompts for masked PIN via Bubble Tea or accepts `--pin` / `GPHSM_PIN` / stdin.
-  - In **Shamir Mode**: Executes 3-of-5 custodian turn-by-turn threshold unlock ceremony.
+  - In **Shamir Mode**: Executes 3-of-5 custodian turn-by-turn threshold unlock ceremony with a single masked prompt per turn (`Enter Custodian Secret Share (masked): `). Each formatted share (`<index>-<64_hex_share>-<8_hex_crc32>`) is validated offline via CRC-32 prior to AT command dispatch, protecting hardware non-volatile retry counters against exhaustion from transcription typos. Accidental entry of legacy 64-hex shares is caught locally with upgrade guidance.
   - If unconfigured, instructs operator to run `gphsm device init`.
   - If already unlocked, reports current authenticated status.
 - **`gphsm echo [message]`**: Ping connected HSM USB key and verify roundtrip serial communication latency.
@@ -98,8 +98,8 @@ To preserve existing operator muscle memory, scripts, and CI/CD pipelines:
 
 | Operation | Interactive Terminal (TTY) | Headless / Pipe / CI Fallback |
 | :--- | :--- | :--- |
-| **`gphsm unlock`** | Masked password prompt (`bubbles/textinput`) rendering bullets (`••••••`) without plaintext echo. | Reads single line from `stdin` or requires `--pin` flag without ANSI escape sequences. |
-| **`gphsm device init`** | Interactive mode selection ([1] PIN, [2] Shamir) and masked confirmation prompts. | Requires `--mode=pin --pin=<pin>` or `--mode=shamir` flags. |
+| **`gphsm unlock`** | In PIN mode: masked password prompt (`bubbles/textinput`) rendering bullets (`••••••`). In Shamir mode: turn-by-turn ceremony with single masked prompt per custodian reading `<index>-<64_hex_share>-<8_hex_crc32>` with offline CRC-32 verification. | In PIN mode: reads single line from `stdin` or `--pin`. In Shamir mode: reads trimmed lines from `stdin` with offline CRC-32 verification. |
+| **`gphsm device init`** | Interactive mode selection ([1] PIN, [2] Shamir) and masked confirmation prompts. In Shamir mode: turn-by-turn display of formatted shares with screen purge. | Requires `--mode=pin --pin=<pin>` or `--mode=shamir` flags. |
 | **`gphsm device firmware update`** | Animated gradient progress bar (`bubbles/progress`) with live transfer metrics and percentage. | Emits discrete periodic plain-text log lines (e.g. `[INFO] DFU Transfer: 50% complete (300/600 bytes)`). |
 
 ---
