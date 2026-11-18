@@ -35,6 +35,7 @@ func init() {
 	rootCmd.AddCommand(newKeyCmd())
 	rootCmd.AddCommand(newEchoCmd())
 	rootCmd.AddCommand(newRandomCmd())
+	rootCmd.AddCommand(newVersionCmd())
 
 	// Backward-compatible hidden aliases on rootCmd for legacy workflows
 	legacyInfo := newDeviceInfoCmd()
